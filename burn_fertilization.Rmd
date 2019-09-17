@@ -56,6 +56,7 @@ ggplot(ev.correct, aes(y=ev.blade, x=ev.litter))+
   geom_point() +
   geom_smooth(method = stats::lm, se = F)   
 
+rm(ev.correct)
 ```
   
 ###### Petasites frigidus
@@ -116,6 +117,7 @@ biomass <- left_join(biomass, vv.correct) %>%
   mutate(vv.oldgrowth = coalesce(vv.oldgrowth_cor, vv.oldgrowth)) %>%
   select(-vv.newgrowth_cor, -vv.oldgrowth_cor)
   
+rm(vv.correct)
 ```
 
 ###### Ledum palustre  
@@ -172,6 +174,7 @@ ggplot(biomass, aes(y=lp.newgrowth,x=lp.oldgrowth)) +
   geom_point() +
   geom_smooth(method = stats::lm, se = F)
 
+rm(lp.correct)
 ```
 
 ```{r biomass, include=F}
@@ -183,14 +186,38 @@ small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev
                     "fungi","evergr.litter","decid.litter")
 
 large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
-                    "sp.oldstem","lp.newgrowth.leaves","lp.newgrowth.stems","lp.oldgrowth.leaves",
-                    "lp.oldgrowth.stems","lp.dead","lp.infl","lp.below")
+                    "sp.oldstem","lp.newgrowth","lp.oldgrowth","lp.dead","lp.infl","lp.below")
 
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
 biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
+rm(small_quad_spp,large_quad_spp)
 
-rm(small_quad_spp,large_quad_spp) 
+biomass_spp_anpp <- mutate(biomass, 
+                      ev.anpp = ev.blade + ev.infl,
+                      cb.anpp = cb.blade + cb.infl,
+                      bn.anpp = bn.leaves + bn.newstems + bn.infl,
+                      sp.anpp = sp.newstem + sp.leaves,
+                      vv.anpp = vv.newgrowth + vv.infl,
+                      lp.anpp = lp.newgrowth + lp.infl,
+                      ct.anpp = ct.newgrowth,
+                      ap.anpp = ap.newgrowth,
+                      rc.anpp = rc.above + rc.litter + rc.litter,
+                      pf.anpp = pf.above) %>% 
+                   select(site:treatment, ev.anpp:pf.anpp)
 
+biomass_ft_anpp <- mutate(biomass_spp_anpp,
+                     sedge.anpp = ev.anpp + cb.anpp,
+                     decid.anpp = bn.anpp + sp.anpp,
+                     evergr.anpp = vv.anpp + ct.anpp + lp.anpp + ap.anpp,
+                     forb.anpp = rc.anpp + pf.anpp) %>% 
+                  select(site:treatment, sedge.anpp:forb.anpp)
+
+biomass_total <- mutate(biomass_ft_anpp,
+                           total = sedge.anpp + decid.anpp + evergr.anpp + forb.anpp) %>% 
+                select(site:treatment, total)
+
+by_treatment <- group_by(biomass_ft_anpp, site, block, treatment)
+summarise(by_treatment)
 ```
 
 
