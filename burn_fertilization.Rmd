@@ -1,7 +1,6 @@
 ---
 title: "AR Fire Fertilization Results"
 author: "Ian Klupar"
-date: 
 output: html_document
 ---
 
@@ -16,20 +15,21 @@ library(tidyverse)
 
 ```
 ### Biomass
-**Metadata:**  
-
-**Methods:**  
-
-Set working directory and load in file: "burn_fertilization_biomass.csv"
+**File:** "burn_fertilization_biomass.csv"
 
 ##### Corrections by species:
-##### Eriophorum vaginatum
+###### Eriophorum vaginatum  
 
-y = 0.7 + 0.092x  
+ 1.) fit a linear regression that predicts blade wt based on litter wt with poor
+data exempt best fit line is: ev.blade[y] = 0.7 + 0.092 * ev.litter[x]  
+
+2.) I calculated expected blade based off of calculated litter weight and 
+then "moved" the difference between "observed" and predicted into the litter 
+category.  
 
 Therefore, "ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all recalculated based on the amount of litter. 
 
-```{r biomass corrections: erivag, include=T}
+```{r biomass corrections: erivag, include=F}
 library(modelr)
 library(ggpubr)
 options(na.action = na.warn)
@@ -58,9 +58,9 @@ ggplot(ev.correct, aes(y=ev.blade, x=ev.litter))+
 
 ```
   
-##### Petasites frigidus
+###### Petasites frigidus
 
-```{r biomass correction: petfri}
+```{r biomass correction: petfri, include=F}
 
 # S-B4-C high "pf.above" value
 # remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
@@ -68,17 +68,24 @@ ggplot(ev.correct, aes(y=ev.blade, x=ev.litter))+
 biomass[5,"pf.above"] <- 5.87
 ```
 
-##### Vaccinium vitis-idea
+###### Vaccinium vitis-idea  
 
+Change V.vitis-idea values. Some plots had 1.) Old growth, but no new growth or 
+ 2.) New growth that was greater than old growth. Both scenarios are unlikely.
+ To correct, I generated a new growth/old growth ratio for each plot and took
+ the median value from the data. I then used this ratio to generate a value for 
+ the new growth that wasn't there. For plots that had more new growth than old growth
+ I summed the two values to simulate "no new growth" and preformed the above.   
+ 
+Plots that had old growth but no new growth:
+ SB1C,SB3NP  
+ 
+Plots that had new growth > old growth:
+ SB1P, SB2P, SB4P, SB0N, SB1NP, SB2NP, SB4NP, UB0C, UB0P, UB3P, UB0N, UB4NP  
+ 
 Median Ratio = 0.5326087
 
-```{r biomass correction: vacvit}
-# Find the multiplier for plots that were plucked correctly (0.3472222)
-select(biomass, vv.newgrowth, vv.oldgrowth) %>%
-  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
-  mutate(ratio = vv.newgrowth/(vv.newgrowth + vv.oldgrowth)) %>% 
-  arrange(ratio) %>% 
-  summarise(ratio = median(ratio))
+```{r biomass correction: vacvit, include=F}
 
 # New values should match the ratio of correctly plucked plots (0.5326087)
 select(biomass, vv.newgrowth, vv.oldgrowth) %>%
@@ -86,6 +93,14 @@ select(biomass, vv.newgrowth, vv.oldgrowth) %>%
   mutate(ratio = vv.newgrowth/vv.oldgrowth) %>% 
   arrange(ratio) %>% 
   summarise(ratio = median(ratio))
+
+# Find the multiplier for plots that were plucked correctly (0.3472222)
+select(biomass, vv.newgrowth, vv.oldgrowth) %>%
+  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
+  mutate(multiplier = vv.newgrowth/(vv.newgrowth + vv.oldgrowth)) %>% 
+  arrange(multiplier) %>% 
+  summarise(multiplier = mean(multiplier))
+# 0.3472222
 
 # Correct plots that either 1.) vv.newgrowth > vv.oldgrowth or 2.) have vv.oldgrowth values and no vv.newgrowth
 vv.correct <- select(biomass, site:treatment, vv.newgrowth, vv.oldgrowth) %>% 
@@ -95,15 +110,71 @@ vv.correct <- select(biomass, site:treatment, vv.newgrowth, vv.oldgrowth) %>%
          totals_cor = vv.newgrowth_cor + vv.oldgrowth_cor) %>%
   select(site:treatment, vv.newgrowth_cor, vv.oldgrowth_cor)
 
-# need to substitute the corrected values for the values in the data frame
+# Replace bad values with corrected values
+biomass <- left_join(biomass, vv.correct) %>%
+  mutate(vv.newgrowth = coalesce(vv.newgrowth_cor, vv.newgrowth)) %>%
+  mutate(vv.oldgrowth = coalesce(vv.oldgrowth_cor, vv.oldgrowth)) %>%
+  select(-vv.newgrowth_cor, -vv.oldgrowth_cor)
+  
+```
 
-biomass[,c("site","block","treatment","vv.newgrowth","vv.oldgrowth")]
+###### Ledum palustre  
 
+L. palustre was sepereated incorrectly. Some had all leaves categorized as new growth where
+ others had new growth with no corresponding old growth. Both scenarios are incorrect, so 
+ in an attempt to correct it, I further seperated each bag originally labeled "new growth" and "old growth"
+ into leaves and stems. This left me with values for "old leaves"" and "old stems"" and "new leaves" 
+ and "new stems". From this, I isolated plots which had newLeaves > oldLeaves, which is a sign of
+ poor seperation. Then I grouped together oldLeaves, oldStems, newStems and categorized that as 
+ "old growth". From this, I determined a correct ratio for old to new and applied that ratio to
+ only the plots that had newLeaves > oldLeaves.  
+ 
+```{r biomass correction: ledpal, include=F}
 
+ggplot(biomass, aes(y=(lp.newgrowth.leaves + lp.newgrowth.stems) ,
+                    x=(lp.oldgrowth.leaves +lp.oldgrowth.stems))) +
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F)
+
+# median "newgrowth.leaves":"old" for plots that agree with the condition lp.newgrowth.leaves < lp.oldgrowth.leaves (my way of determining if the plot was seperated poorly)
+select(biomass, grep("lp.*", colnames(biomass))) %>% 
+  filter(lp.oldgrowth.leaves > lp.newgrowth.leaves) %>%
+  mutate(lp.old = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+         lp.new = (lp.newgrowth.leaves + lp.newgrowth.stems),
+         ratio = (lp.new / lp.old),
+         multiplier = lp.new / (lp.new + lp.old)) %>%
+  arrange(ratio) %>%
+  summarise(ratio = median(ratio, na.rm = T),
+            multiplier = median(multiplier, na.rm = T))
+
+# median new < old ratio: 0.1216216
+# median new > old ratio: 0.6486691
+# multiplier = 0.1084337
+  
+lp.correct <- select(biomass, site:treatment, grep("lp.*", colnames(biomass))) %>% 
+  filter(lp.oldgrowth.leaves == 0 | lp.oldgrowth.leaves < lp.newgrowth.leaves) %>%
+  mutate(lp.old = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+         lp.new = (lp.newgrowth.leaves + lp.newgrowth.stems),
+         lp.newgrowth_cor = (lp.old + lp.new) * 0.1084337,
+         lp.oldgrowth_cor = (lp.old + lp.new) - lp.newgrowth_cor,
+         sum1 = lp.newgrowth_cor + lp.oldgrowth_cor,
+         sum2 = lp.new + lp.old) %>%
+  select(site:treatment, lp.newgrowth_cor, lp.oldgrowth_cor)
+
+biomass <- left_join(biomass, lp.correct) %>% 
+  mutate(lp.newgrowth = lp.newgrowth.leaves + lp.newgrowth.stems,
+         lp.oldgrowth = lp.oldgrowth.leaves + lp.oldgrowth.stems) %>% 
+  mutate(lp.newgrowth = coalesce(lp.newgrowth_cor, lp.newgrowth),
+         lp.oldgrowth = coalesce(lp.oldgrowth_cor, lp.oldgrowth)) %>% 
+  select(-lp.newgrowth.leaves:-lp.oldgrowth.stems, -lp.newgrowth_cor, -lp.oldgrowth_cor)
+
+ggplot(biomass, aes(y=lp.newgrowth,x=lp.oldgrowth)) +
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F)
 
 ```
 
-```{r biomass}
+```{r biomass, include=F}
 small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
                     "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
                     "cb.liveroots","cb.deadroots","vv.newgrowth","vv.oldgrowth","vv.infl","ct.newgrowth",
@@ -118,28 +189,11 @@ large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl",
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
 biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
 
-rm(small_quad_spp,large_quad_spp)
-
-by_treat <- group_by(biomass, site,treatment)
-summarise(by_treat, 
-          ev = mean(ev.blade),
-          bn = mean(bn.leaves),
-          cb = mean(cb.blade),
-          sp = mean(sp.leaves),
-          vv = mean(vv.newgrowth),
-          ct = mean(ct.newgrowth),
-          ap = mean(ap.newgrowth),
-          lp = mean(lp.newgrowth.leaves),
-          rc = mean(rc.above),
-          pf = mean(pf.above))
-```
-
-
-
-
-```{r biomass corrections}
+rm(small_quad_spp,large_quad_spp) 
 
 ```
+
+
 
 
 
