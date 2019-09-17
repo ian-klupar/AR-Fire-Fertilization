@@ -95,7 +95,7 @@ vv.correct <- select(biomass, site:treatment, vv.newgrowth, vv.oldgrowth) %>%
          totals_cor = vv.newgrowth_cor + vv.oldgrowth_cor) %>%
   select(site:treatment, vv.newgrowth_cor, vv.oldgrowth_cor)
 
-
+# need to substitute the corrected values for the values in the data frame
 
 biomass[,c("site","block","treatment","vv.newgrowth","vv.oldgrowth")]
 
