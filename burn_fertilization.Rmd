@@ -1,0 +1,153 @@
+---
+title: "AR Fire Fertilization Results"
+author: "Ian Klupar"
+date: 
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = TRUE)
+
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+library(tidyverse)
+
+```
+### Biomass
+**Metadata:**  
+
+**Methods:**  
+
+Set working directory and load in file: "burn_fertilization_biomass.csv"
+
+##### Corrections by species:
+##### Eriophorum vaginatum
+
+y = 0.7 + 0.092x  
+
+Therefore, "ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all recalculated based on the amount of litter. 
+
+```{r biomass corrections: erivag, include=T}
+library(modelr)
+library(ggpubr)
+options(na.action = na.warn)
+
+biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv", header = T, stringsAsFactors = F)
+biomass <- as_tibble(biomass)
+
+# correct high "ev.blade" values based on "ev.litter"
+ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter)
+
+# plot and linear model without over estimated values
+ggplot(ev.correct[-c(25,30,37,49),], aes(y=ev.blade, x=ev.litter))+
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation()
+
+biomass[25,"ev.blade"] <- 0.7 + 0.092 * biomass[25,"ev.litter"]
+biomass[30,"ev.blade"] <- 0.7 + 0.092 * biomass[30,"ev.litter"]
+biomass[37,"ev.blade"] <- 0.7 + 0.092 * biomass[37,"ev.litter"]
+biomass[49,"ev.blade"] <- 0.7 + 0.092 * biomass[49,"ev.litter"]
+
+ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter)
+ggplot(ev.correct, aes(y=ev.blade, x=ev.litter))+
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F)   
+
+```
+  
+##### Petasites frigidus
+
+```{r biomass correction: petfri}
+
+# S-B4-C high "pf.above" value
+# remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
+
+biomass[5,"pf.above"] <- 5.87
+```
+
+##### Vaccinium vitis-idea
+
+Median Ratio = 0.5326087
+
+```{r biomass correction: vacvit}
+# Find the multiplier for plots that were plucked correctly (0.3472222)
+select(biomass, vv.newgrowth, vv.oldgrowth) %>%
+  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
+  mutate(ratio = vv.newgrowth/(vv.newgrowth + vv.oldgrowth)) %>% 
+  arrange(ratio) %>% 
+  summarise(ratio = median(ratio))
+
+# New values should match the ratio of correctly plucked plots (0.5326087)
+select(biomass, vv.newgrowth, vv.oldgrowth) %>%
+  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
+  mutate(ratio = vv.newgrowth/vv.oldgrowth) %>% 
+  arrange(ratio) %>% 
+  summarise(ratio = median(ratio))
+
+# Correct plots that either 1.) vv.newgrowth > vv.oldgrowth or 2.) have vv.oldgrowth values and no vv.newgrowth
+vv.correct <- select(biomass, site:treatment, vv.newgrowth, vv.oldgrowth) %>% 
+  filter((vv.newgrowth == 0 & vv.oldgrowth != 0)|(vv.newgrowth >  vv.oldgrowth)) %>%
+  mutate(vv.newgrowth_cor = (vv.newgrowth + vv.oldgrowth)*0.3472222,
+            vv.oldgrowth_cor = (vv.newgrowth + vv.oldgrowth) - vv.newgrowth_cor,
+         totals_cor = vv.newgrowth_cor + vv.oldgrowth_cor) %>%
+  select(site:treatment, vv.newgrowth_cor, vv.oldgrowth_cor)
+
+
+
+biomass[,c("site","block","treatment","vv.newgrowth","vv.oldgrowth")]
+
+
+
+```
+
+```{r biomass}
+small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
+                    "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
+                    "cb.liveroots","cb.deadroots","vv.newgrowth","vv.oldgrowth","vv.infl","ct.newgrowth",
+                    "ct.oldgrowth","ct.dead","ap.newgrowth","ap.oldgrowth","rc.above","rc.litter","rc.below",
+                    "rc.infl","pf.above","pf.below","pf.litter","fine.roots","coarse.roots","moss","lichen",
+                    "fungi","evergr.litter","decid.litter")
+
+large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
+                    "sp.oldstem","lp.newgrowth.leaves","lp.newgrowth.stems","lp.oldgrowth.leaves",
+                    "lp.oldgrowth.stems","lp.dead","lp.infl","lp.below")
+
+biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
+biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
+
+rm(small_quad_spp,large_quad_spp)
+
+by_treat <- group_by(biomass, site,treatment)
+summarise(by_treat, 
+          ev = mean(ev.blade),
+          bn = mean(bn.leaves),
+          cb = mean(cb.blade),
+          sp = mean(sp.leaves),
+          vv = mean(vv.newgrowth),
+          ct = mean(ct.newgrowth),
+          ap = mean(ap.newgrowth),
+          lp = mean(lp.newgrowth.leaves),
+          rc = mean(rc.above),
+          pf = mean(pf.above))
+```
+
+
+
+
+```{r biomass corrections}
+
+```
+
+
+
+
+
+
+
+
+
+
+

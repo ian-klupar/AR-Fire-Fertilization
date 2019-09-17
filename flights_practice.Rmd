@@ -1,0 +1,37 @@
+---
+title: "Flights"
+author: "Ian Klupar"
+date: "9/16/2019"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = T)
+
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+
+library(nycflights13)
+library(tidyverse)
+
+
+
+```
+
+
+```{r flights, tidy=T}
+filter(flights, month == 1, day == 1)
+
+delays <- flights %>% 
+  group_by(dest) %>% 
+  summarise(
+    count = n(),
+    dist = mean(distance, na.rm = TRUE),
+    delay = mean(arr_delay, na.rm = TRUE)
+  ) %>% 
+  filter(count > 20, dest != "HNL")
+
+```
+
