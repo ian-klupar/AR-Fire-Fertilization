@@ -4,7 +4,7 @@ author: "Ian Klupar"
 output: html_document
 ---
 
-```{r setup, include=F}
+```{r setup, include=T}
 knitr::opts_chunk$set(echo = TRUE)
 
 # clear all
@@ -29,7 +29,7 @@ category.
 
 Therefore, "ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all recalculated based on the amount of litter. 
 
-```{r biomass corrections: erivag, include=F}
+```{r biomass corrections: erivag, include=T}
 library(modelr)
 library(ggpubr)
 options(na.action = na.warn)
@@ -38,7 +38,8 @@ biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/b
 biomass <- as_tibble(biomass)
 
 # correct high "ev.blade" values based on "ev.litter"
-ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter)
+ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter) %>% 
+  mutate(sum = ev.blade + ev.litter)
 
 # plot and linear model without over estimated values
 ggplot(ev.correct[-c(25,30,37,49),], aes(y=ev.blade, x=ev.litter))+
@@ -46,22 +47,22 @@ ggplot(ev.correct[-c(25,30,37,49),], aes(y=ev.blade, x=ev.litter))+
   geom_smooth(method = stats::lm, se = F) +
   stat_regline_equation()
 
-biomass[25,"ev.blade"] <- 0.7 + 0.092 * biomass[25,"ev.litter"]
-biomass[30,"ev.blade"] <- 0.7 + 0.092 * biomass[30,"ev.litter"]
-biomass[37,"ev.blade"] <- 0.7 + 0.092 * biomass[37,"ev.litter"]
-biomass[49,"ev.blade"] <- 0.7 + 0.092 * biomass[49,"ev.litter"]
+list <- c(25, 30, 37, 49)
+for(i in list){
+ biomass[i,"ev.litter"] <- (ev.correct[i,"sum"]-0.7)/1.092
+ biomass[i,"ev.blade"] <- 0.7 + 0.092*biomass[i,"ev.litter"] 
+}
 
-ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter)
-ggplot(ev.correct, aes(y=ev.blade, x=ev.litter))+
+ggplot(biomass, aes(y=ev.blade, x=ev.litter)) +
   geom_point() +
   geom_smooth(method = stats::lm, se = F)   
 
-rm(ev.correct)
+rm(i, list, ev.correct)
 ```
   
 ###### Petasites frigidus
 
-```{r biomass correction: petfri, include=F}
+```{r biomass correction: petfri, eval=FALSE, include=FALSE}
 
 # S-B4-C high "pf.above" value
 # remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
@@ -88,36 +89,37 @@ Median Ratio = 0.5326087
 
 ```{r biomass correction: vacvit, include=F}
 
-# New values should match the ratio of correctly plucked plots (0.5326087)
-select(biomass, vv.newgrowth, vv.oldgrowth) %>%
-  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
-  mutate(ratio = vv.newgrowth/vv.oldgrowth) %>% 
-  arrange(ratio) %>% 
-  summarise(ratio = median(ratio))
+ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation() 
 
-# Find the multiplier for plots that were plucked correctly (0.3472222)
-select(biomass, vv.newgrowth, vv.oldgrowth) %>%
-  filter(vv.newgrowth > 0 & vv.oldgrowth > 0) %>%
-  mutate(multiplier = vv.newgrowth/(vv.newgrowth + vv.oldgrowth)) %>% 
-  arrange(multiplier) %>% 
-  summarise(multiplier = mean(multiplier))
-# 0.3472222
+vv.correct <- anti_join(select(biomass, site:treatment,vv.newgrowth, vv.oldgrowth), 
+                       select(biomass,site:treatment, vv.newgrowth, vv.oldgrowth) %>%
+                          filter((vv.newgrowth > 2*vv.oldgrowth))) 
 
-# Correct plots that either 1.) vv.newgrowth > vv.oldgrowth or 2.) have vv.oldgrowth values and no vv.newgrowth
-vv.correct <- select(biomass, site:treatment, vv.newgrowth, vv.oldgrowth) %>% 
-  filter((vv.newgrowth == 0 & vv.oldgrowth != 0)|(vv.newgrowth >  vv.oldgrowth)) %>%
-  mutate(vv.newgrowth_cor = (vv.newgrowth + vv.oldgrowth)*0.3472222,
-            vv.oldgrowth_cor = (vv.newgrowth + vv.oldgrowth) - vv.newgrowth_cor,
-         totals_cor = vv.newgrowth_cor + vv.oldgrowth_cor) %>%
-  select(site:treatment, vv.newgrowth_cor, vv.oldgrowth_cor)
+ggplot(vv.correct, aes(y=vv.newgrowth, x=vv.oldgrowth)) +
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation()
 
-# Replace bad values with corrected values
-biomass <- left_join(biomass, vv.correct) %>%
-  mutate(vv.newgrowth = coalesce(vv.newgrowth_cor, vv.newgrowth)) %>%
-  mutate(vv.oldgrowth = coalesce(vv.oldgrowth_cor, vv.oldgrowth)) %>%
-  select(-vv.newgrowth_cor, -vv.oldgrowth_cor)
-  
-rm(vv.correct)
+vv.correct <- select(biomass, site:treatment,vv.newgrowth, vv.oldgrowth) %>% 
+  mutate(sum = vv.newgrowth + vv.oldgrowth)
+
+# y = 0.37 + 0.2 x
+list <- which((biomass["vv.newgrowth"] > 2*biomass["vv.oldgrowth"]))
+
+for (i in list){
+  biomass[i,"vv.oldgrowth"] <- (vv.correct[i,"sum"] - 0.37) / 1.2
+  biomass[i,"vv.newgrowth"] <- 0.37 + 0.2 * biomass[i,"vv.oldgrowth"]
+}
+
+ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation()
+
+rm(i, list, vv.correct)
 ```
 
 ###### Ledum palustre  
@@ -139,29 +141,26 @@ ggplot(biomass, aes(y=(lp.newgrowth.leaves + lp.newgrowth.stems) ,
   geom_smooth(method = stats::lm, se = F)
 
 # median "newgrowth.leaves":"old" for plots that agree with the condition lp.newgrowth.leaves < lp.oldgrowth.leaves (my way of determining if the plot was seperated poorly)
-select(biomass, grep("lp.*", colnames(biomass))) %>% 
-  filter(lp.oldgrowth.leaves > lp.newgrowth.leaves) %>%
-  mutate(lp.old = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
-         lp.new = (lp.newgrowth.leaves + lp.newgrowth.stems),
-         ratio = (lp.new / lp.old),
-         multiplier = lp.new / (lp.new + lp.old)) %>%
-  arrange(ratio) %>%
-  summarise(ratio = median(ratio, na.rm = T),
-            multiplier = median(multiplier, na.rm = T))
 
-# median new < old ratio: 0.1216216
-# median new > old ratio: 0.6486691
-# multiplier = 0.1084337
+lp.correct <- anti_join(select(biomass, site:treatment, grep("lp.*", colnames(biomass))),
+          select(biomass, site:treatment, grep("lp.*", colnames(biomass))) %>% 
+  filter(lp.oldgrowth.leaves < lp.newgrowth.leaves)) %>%
+  mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+         lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
+         sum = lp.oldgrowth + lp.newgrowth)
+
+ggplot(lp.correct, aes(y=lp.newgrowth ,x=lp.oldgrowth)) +
+  geom_point() +
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation()
   
-lp.correct <- select(biomass, site:treatment, grep("lp.*", colnames(biomass))) %>% 
-  filter(lp.oldgrowth.leaves == 0 | lp.oldgrowth.leaves < lp.newgrowth.leaves) %>%
-  mutate(lp.old = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
-         lp.new = (lp.newgrowth.leaves + lp.newgrowth.stems),
-         lp.newgrowth_cor = (lp.old + lp.new) * 0.1084337,
-         lp.oldgrowth_cor = (lp.old + lp.new) - lp.newgrowth_cor,
-         sum1 = lp.newgrowth_cor + lp.oldgrowth_cor,
-         sum2 = lp.new + lp.old) %>%
-  select(site:treatment, lp.newgrowth_cor, lp.oldgrowth_cor)
+list <- which((biomass["lp.newgrowth.leaves"] > biomass["lp.oldgrowth.leaves"]))
+
+for(i in list){
+  biomass[i,"lp.oldgrowth"] <- (lp.correct[i,"sum"] - 0.21)/1.21
+  biomass[i,"lp.newgrowth"] <- 0.21 + 0.12 * biomass[i,"lp.oldgrowth"]
+}
+
 
 biomass <- left_join(biomass, lp.correct) %>% 
   mutate(lp.newgrowth = lp.newgrowth.leaves + lp.newgrowth.stems,
@@ -212,12 +211,10 @@ biomass_ft_anpp <- mutate(biomass_spp_anpp,
                      forb.anpp = rc.anpp + pf.anpp) %>% 
                   select(site:treatment, sedge.anpp:forb.anpp)
 
-biomass_total <- mutate(biomass_ft_anpp,
-                           total = sedge.anpp + decid.anpp + evergr.anpp + forb.anpp) %>% 
-                select(site:treatment, total)
 
-by_treatment <- group_by(biomass_ft_anpp, site, block, treatment)
-summarise(by_treatment)
+ggplot(biomass_ft_anpp, aes(x=treatment,y=decid.anpp, color=site, alpha=0.1))+
+  geom_point()
+
 ```
 
 
