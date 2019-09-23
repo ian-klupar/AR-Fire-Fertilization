@@ -4,7 +4,7 @@ author: "Ian Klupar"
 output: html_document
 ---
 
-```{r setup, include=T}
+```{r setup, include=F}
 knitr::opts_chunk$set(echo = TRUE)
 
 # clear all
@@ -108,11 +108,13 @@ vv.correct <- select(biomass, site:treatment,vv.newgrowth, vv.oldgrowth) %>%
 
 # y = 0.37 + 0.2 x
 list <- which((biomass["vv.newgrowth"] > 2*biomass["vv.oldgrowth"]))
-
+count <- 0
 for (i in list){
   biomass[i,"vv.oldgrowth"] <- (vv.correct[i,"sum"] - 0.37) / 1.2
   biomass[i,"vv.newgrowth"] <- 0.37 + 0.2 * biomass[i,"vv.oldgrowth"]
+  count = count + 1
 }
+print(count)
 
 ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
   geom_point() +
@@ -133,14 +135,12 @@ L. palustre was sepereated incorrectly. Some had all leaves categorized as new g
  "old growth". From this, I determined a correct ratio for old to new and applied that ratio to
  only the plots that had newLeaves > oldLeaves.  
  
-```{r biomass correction: ledpal, include=F}
+```{r biomass correction: ledpal, include=F, echo=F}
 
 ggplot(biomass, aes(y=(lp.newgrowth.leaves + lp.newgrowth.stems) ,
                     x=(lp.oldgrowth.leaves +lp.oldgrowth.stems))) +
   geom_point() +
   geom_smooth(method = stats::lm, se = F)
-
-# median "newgrowth.leaves":"old" for plots that agree with the condition lp.newgrowth.leaves < lp.oldgrowth.leaves (my way of determining if the plot was seperated poorly)
 
 lp.correct <- anti_join(select(biomass, site:treatment, grep("lp.*", colnames(biomass))),
           select(biomass, site:treatment, grep("lp.*", colnames(biomass))) %>% 
@@ -153,27 +153,31 @@ ggplot(lp.correct, aes(y=lp.newgrowth ,x=lp.oldgrowth)) +
   geom_point() +
   geom_smooth(method = stats::lm, se = F) +
   stat_regline_equation()
-  
+
+biomass <- biomass %>% 
+  mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+         lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
+         lp.sum = (lp.oldgrowth + lp.newgrowth))
+
+# y = 0.21 + 0.12 x
 list <- which((biomass["lp.newgrowth.leaves"] > biomass["lp.oldgrowth.leaves"]))
-
+count <- 0
 for(i in list){
-  biomass[i,"lp.oldgrowth"] <- (lp.correct[i,"sum"] - 0.21)/1.21
+  biomass[i,"lp.oldgrowth"] <- (biomass[i,"lp.sum"] - 0.21)/1.21
   biomass[i,"lp.newgrowth"] <- 0.21 + 0.12 * biomass[i,"lp.oldgrowth"]
+  count <- count + 1
 }
-
-
-biomass <- left_join(biomass, lp.correct) %>% 
-  mutate(lp.newgrowth = lp.newgrowth.leaves + lp.newgrowth.stems,
-         lp.oldgrowth = lp.oldgrowth.leaves + lp.oldgrowth.stems) %>% 
-  mutate(lp.newgrowth = coalesce(lp.newgrowth_cor, lp.newgrowth),
-         lp.oldgrowth = coalesce(lp.oldgrowth_cor, lp.oldgrowth)) %>% 
-  select(-lp.newgrowth.leaves:-lp.oldgrowth.stems, -lp.newgrowth_cor, -lp.oldgrowth_cor)
+print(count)
 
 ggplot(biomass, aes(y=lp.newgrowth,x=lp.oldgrowth)) +
   geom_point() +
-  geom_smooth(method = stats::lm, se = F)
+  geom_smooth(method = stats::lm, se = F) +
+  stat_regline_equation()
 
-rm(lp.correct)
+biomass <- select(biomass, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
+                  -lp.oldgrowth.stems, -lp.sum)
+
+rm(i, list, lp.correct)
 ```
 
 ```{r biomass, include=F}
@@ -190,30 +194,28 @@ large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl",
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
 biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
 rm(small_quad_spp,large_quad_spp)
+```
 
-biomass_spp_anpp <- mutate(biomass, 
-                      ev.anpp = ev.blade + ev.infl,
-                      cb.anpp = cb.blade + cb.infl,
-                      bn.anpp = bn.leaves + bn.newstems + bn.infl,
-                      sp.anpp = sp.newstem + sp.leaves,
-                      vv.anpp = vv.newgrowth + vv.infl,
-                      lp.anpp = lp.newgrowth + lp.infl,
-                      ct.anpp = ct.newgrowth,
-                      ap.anpp = ap.newgrowth,
-                      rc.anpp = rc.above + rc.litter + rc.litter,
-                      pf.anpp = pf.above) %>% 
-                   select(site:treatment, ev.anpp:pf.anpp)
+```{r biomass graphs}
 
-biomass_ft_anpp <- mutate(biomass_spp_anpp,
-                     sedge.anpp = ev.anpp + cb.anpp,
-                     decid.anpp = bn.anpp + sp.anpp,
-                     evergr.anpp = vv.anpp + ct.anpp + lp.anpp + ap.anpp,
-                     forb.anpp = rc.anpp + pf.anpp) %>% 
-                  select(site:treatment, sedge.anpp:forb.anpp)
+biomass_pft.total <- mutate(biomass, 
+                            sedge.wt = ev.blade + ev.rhizome + cb.blade + cb.rhizome,
+                            decid.wt = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
+                              sp.oldstem,
+                            evergr.wt = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
+                              lp.newgrowth + lp.oldgrowth + lp.infl + ap.newgrowth + ap.oldgrowth,
+                            forb.wt = rc.above + rc.litter + pf.above) %>% 
+                     select(site:treatment, sedge.wt:forb.wt)
+
+biomass_pft.anpp <- mutate(biomass,
+                     sedge.anpp = ev.blade + ev.infl + cb.blade + cb.infl,
+                     decid.anpp = bn.leaves + bn.newstems + bn.infl + sp.newstem + sp.leaves,
+                     evergr.anpp = vv.newgrowth + vv.infl + lp.newgrowth + lp.infl + ct.newgrowth +
+                       ap.newgrowth,
+                     forb.anpp = rc.above + rc.litter + pf.above) %>% 
+                  select(site:treatment,sedge.anpp:forb.anpp)
 
 
-ggplot(biomass_ft_anpp, aes(x=treatment,y=decid.anpp, color=site, alpha=0.1))+
-  geom_point()
 
 ```
 
