@@ -13,12 +13,54 @@ if(!is.null(dev.list())) dev.off()
 cat("\014")
 library(tidyverse)
 
+# function for computing standard error
+s.err <- function(x){
+  sd(x)/sqrt(length(x))
+}
+
+# from cookbook-r (if i decide to summarize data outside of ggplot)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE){
+    library(plyr)
+    length2 <- function (x, na.rm=FALSE){
+        if (na.rm) sum(!is.na(x))
+        else length(x)
+    }
+
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col){
+        c(N = length2(xx[[col]], na.rm=na.rm),
+          mean = mean(xx[[col]], na.rm=na.rm),
+          sd = sd(xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+    datac <- rename(datac, c("mean" = measurevar))
+    datac$se <- datac$sd / sqrt(datac$N) 
+
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+
 ```
 ### Biomass
+***
 **File:** "burn_fertilization_biomass.csv"
+```{r biomass, include=T}
+library(modelr)
+library(ggpubr)
+options(na.action = na.warn)
+
+biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv", header = T, stringsAsFactors = F)
+biomass <- as_tibble(biomass)
+```
 
 ##### Corrections by species:
-###### Eriophorum vaginatum  
+***
+*Eriophorum vaginatum*
 
  1.) fit a linear regression that predicts blade wt based on litter wt with poor
 data exempt best fit line is: ev.blade[y] = 0.7 + 0.092 * ev.litter[x]  
@@ -30,12 +72,6 @@ category.
 Therefore, "ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all recalculated based on the amount of litter. 
 
 ```{r biomass corrections: erivag, include=T}
-library(modelr)
-library(ggpubr)
-options(na.action = na.warn)
-
-biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv", header = T, stringsAsFactors = F)
-biomass <- as_tibble(biomass)
 
 # correct high "ev.blade" values based on "ev.litter"
 ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter) %>% 
@@ -60,7 +96,7 @@ ggplot(biomass, aes(y=ev.blade, x=ev.litter)) +
 rm(i, list, ev.correct)
 ```
   
-###### Petasites frigidus
+*Petasites frigidus*
 
 ```{r biomass correction: petfri, eval=FALSE, include=FALSE}
 
@@ -70,7 +106,7 @@ rm(i, list, ev.correct)
 biomass[5,"pf.above"] <- 5.87
 ```
 
-###### Vaccinium vitis-idea  
+*Vaccinium vitis-idea*
 
 Change V.vitis-idea values. Some plots had 1.) Old growth, but no new growth or 
  2.) New growth that was greater than old growth. Both scenarios are unlikely.
@@ -124,7 +160,7 @@ ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
 rm(i, list, vv.correct)
 ```
 
-###### Ledum palustre  
+*Ledum palustre*
 
 L. palustre was sepereated incorrectly. Some had all leaves categorized as new growth where
  others had new growth with no corresponding old growth. Both scenarios are incorrect, so 
@@ -177,10 +213,19 @@ ggplot(biomass, aes(y=lp.newgrowth,x=lp.oldgrowth)) +
 biomass <- select(biomass, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
                   -lp.oldgrowth.stems, -lp.sum)
 
-rm(i, list, lp.correct)
+rm(i, count, list, lp.correct)
 ```
 
-```{r biomass, include=F}
+
+```{r biomass scaling, include=F}
+# If i want to produce graphs without corrections
+# biomass <- biomass %>%
+#   mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+#          lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
+#          lp.sum = (lp.oldgrowth + lp.newgrowth))
+# biomass <- select(biomass, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
+#                   -lp.oldgrowth.stems, -lp.sum)
+
 small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
                     "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
                     "cb.liveroots","cb.deadroots","vv.newgrowth","vv.oldgrowth","vv.infl","ct.newgrowth",
@@ -193,27 +238,96 @@ large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl",
 
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
 biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
+
+biomass$treatment[biomass$treatment=="CX"] <- "C"
+
 rm(small_quad_spp,large_quad_spp)
 ```
+#### Final Biomass Data
 
-```{r biomass graphs}
+```{r complete biomass and productivity data}
 
-biomass_pft.total <- mutate(biomass, 
-                            sedge.wt = ev.blade + ev.rhizome + cb.blade + cb.rhizome,
-                            decid.wt = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
+pft.biomass <- mutate(biomass, 
+                            sedge = ev.blade + ev.rhizome + cb.blade + cb.rhizome,
+                            decid = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
                               sp.oldstem,
-                            evergr.wt = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
+                            evergr = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
                               lp.newgrowth + lp.oldgrowth + lp.infl + ap.newgrowth + ap.oldgrowth,
-                            forb.wt = rc.above + rc.litter + pf.above) %>% 
-                     select(site:treatment, sedge.wt:forb.wt)
+                            forb = rc.above + rc.litter + pf.above) %>% 
+                     select(site:treatment, sedge:forb)
 
-biomass_pft.anpp <- mutate(biomass,
-                     sedge.anpp = ev.blade + ev.infl + cb.blade + cb.infl,
-                     decid.anpp = bn.leaves + bn.newstems + bn.infl + sp.newstem + sp.leaves,
-                     evergr.anpp = vv.newgrowth + vv.infl + lp.newgrowth + lp.infl + ct.newgrowth +
+pft.anpp <- mutate(biomass,
+                     sedge = ev.blade + ev.infl + cb.blade + cb.infl,
+                     decid = bn.leaves + bn.newstems + bn.infl + sp.newstem + sp.leaves,
+                     evergr = vv.newgrowth + vv.infl + lp.newgrowth + lp.infl + ct.newgrowth +
                        ap.newgrowth,
-                     forb.anpp = rc.above + rc.litter + pf.above) %>% 
-                  select(site:treatment,sedge.anpp:forb.anpp)
+                     forb = rc.above + rc.litter + pf.above)%>% 
+                  select(site:treatment,sedge:forb)
+```
+#### Biomass Graphs
+
+```{r productivity percents & correlations}
+pft.anpp %>% 
+  filter(site=="S") %>% 
+  gather(sedge:forb, key="pft", value = "anpp") %>% 
+  ggplot(aes(fill=pft, y=anpp, x=treatment))+
+  geom_bar(position = "fill",stat = "identity", width = 0.5)+
+  ggtitle("severe anpp")
+
+pft.anpp %>% 
+  filter(site=="U") %>% 
+  gather(sedge:forb, key="pft", value = "anpp") %>% 
+  ggplot(aes(fill=pft, y=anpp, x=treatment))+
+  geom_bar(position = "fill",stat = "identity", width = 0.5)+
+  ggtitle("unburned anpp")
+
+pft.biomass %>% 
+  filter(site=="S") %>% 
+  gather(sedge:forb, key="pft", value = "biomass") %>% 
+  ggplot(aes(fill=pft, y=biomass, x=treatment))+
+  geom_bar(position = "fill",stat = "identity", width = 0.5)+
+  ggtitle("severe biomass")
+
+pft.biomass %>% 
+  filter(site=="U") %>% 
+  gather(sedge:forb, key="pft", value = "biomass") %>% 
+  ggplot(aes(fill=pft, y=biomass, x=treatment))+
+  geom_bar(position = "fill",stat = "identity", width = 0.5)+
+  ggtitle("unburned biomass")
+
+pft.anpp %>% 
+  filter(site=="S") %>% 
+  ggplot(aes(x=decid, y=forb, color=treatment, shape=treatment))+
+  geom_point()+
+  geom_smooth(method = stats::lm, se = F, fullrange = T)+
+  ggtitle("")
+
+```
+
+```{r productivity bar graphs w/error bars}
+pft.anpp %>% 
+  ggplot(aes(x = treatment, y = decid, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  ggtitle("Decid productivity -- g/m2")
+
+pft.anpp %>% 
+  ggplot(aes(x = treatment, y = sedge, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  ggtitle("Sedge productivity -- g/m2")
+
+pft.anpp %>% 
+  ggplot(aes(x = treatment, y = evergr, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  ggtitle("Evergr productivity -- g/m2")
+
+pft.anpp %>% 
+  ggplot(aes(x = treatment, y = forb, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  ggtitle("Forb productivity -- g/m2")
 
 
 
