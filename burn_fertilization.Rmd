@@ -4,7 +4,7 @@ author: "Ian Klupar"
 output: html_document
 ---
 
-```{r setup, echo=F, include=F, results='hide'}
+```{r setup, echo=T, include=F, results='hide'}
 knitr::opts_chunk$set(echo = TRUE)
 
 # clear all
@@ -20,8 +20,7 @@ s.err <- function(x){
 
 ```
 
-
-```{r biomass, include=F, results='hide'}
+```{r biomass, echo=F, include=T, results='hide'}
 library(tidyverse)
 library(modelr)
 library(ggpubr)
@@ -42,23 +41,24 @@ biomass <- as_tibble(biomass)
 
 "ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all re-adjusted based on the amount of litter. 
 
-```{r biomass corrections: erivag}
+```{r biomass corrections: erivag, echo=T, results='hide'}
 
 # correct high "ev.blade" values based on "ev.litter"
-ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter) %>% 
+ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter) %>%
   mutate(sum = ev.blade + ev.litter)
 ev.correct <- ev.correct[-c(25,30,37,49),]
 
 # plot and linear model without over estimated values
-lm(ev.blade~ev.litter,ev.correct)
+ev.lm <- lm(ev.blade~ev.litter,ev.correct)
+predict(ev.lm, ev.correct, interval="confidence")
 
-biomass <- biomass %>% 
+biomass <- biomass %>%
   mutate(sum = (ev.blade + ev.litter))
 
 list <- c(25, 30, 37, 49)
 for(i in list){
  biomass[i,"ev.litter"] <- (biomass[i,"sum"]-0.7)/1.092
- biomass[i,"ev.blade"] <- 0.70021 + 0.09216*biomass[i,"ev.litter"] 
+ biomass[i,"ev.blade"] <- 0.70565 + 0.09199*biomass[i,"ev.litter"]
 }
 
 biomass <- select(biomass, -sum)
@@ -67,7 +67,7 @@ rm(i, list, ev.correct)
   
 *Petasites frigidus*
 
-```{r biomass correction: petfri, results='hide'}
+```{r biomass correction: petfri, echo=T, results='hide'}
 
 # S-B4-C high "pf.above" value
 # remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
@@ -87,94 +87,55 @@ Plots that had old growth but no new growth:
 Plots that had new growth > old growth:
  SB1P, SB2P, SB4P, SB0N, SB1NP, SB2NP, SB4NP, UB0C, UB0P, UB3P, UB0N, UB4NP  
 
-```{r biomass correction: vacvit, results='hide'}
+```{r biomass correction: vacvit, echo=T, results='hide'}
 
-ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
-  geom_point() +
-  geom_smooth(method = stats::lm, se = F) +
-  stat_regline_equation() 
+biomass <- biomass %>%
+  mutate(sum = (vv.oldgrowth + vv.newgrowth))
 
-vv.correct <- anti_join(select(biomass, site:treatment,vv.newgrowth, vv.oldgrowth), 
-                       select(biomass,site:treatment, vv.newgrowth, vv.oldgrowth) %>%
-                          filter((vv.newgrowth > 2*vv.oldgrowth))) 
-vv.correct <- select(biomass, site:treatment,vv.newgrowth, vv.oldgrowth) %>% 
-  mutate(sum = vv.newgrowth + vv.oldgrowth)
+biomass %>%
+  filter(biomass["vv.newgrowth"] <= 2*biomass["vv.oldgrowth"]) %>%
+  lm(vv.newgrowth~vv.oldgrowth, data = .)
+# y = 0.3414 + 0.2380 x
 
-lm(vv.newgrowth~vv.oldgrowth,vv.correct)
-
-# y = 0.37 + 0.2 x
 list <- which((biomass["vv.newgrowth"] > 2*biomass["vv.oldgrowth"]))
-count <- 0
+
 for (i in list){
-  biomass[i,"vv.oldgrowth"] <- (vv.correct[i,"sum"] - 0.3734) / 1.2028
-  biomass[i,"vv.newgrowth"] <- 0.3734 + 0.2028 * biomass[i,"vv.oldgrowth"]
-  count = count + 1
+  biomass[i,"vv.oldgrowth"] <- (biomass[i,"sum"] - 0.3414) / 1.238
+  biomass[i,"vv.newgrowth"] <- 0.3414 + (0.238 * biomass[i,"vv.oldgrowth"])
 }
-print(count)
 
-ggplot(biomass, aes(y=vv.newgrowth, x=vv.oldgrowth))+
-  geom_point() +
-  geom_smooth(method = stats::lm, se = F) +
-  stat_regline_equation() 
-
-rm(i, list, vv.correct)
+biomass <- select(biomass, -sum)
+rm(i, list)
 ```
 
 *Ledum palustre*
-
-L. palustre was sepereated incorrectly. Some had all leaves categorized as new growth where
- others had new growth with no corresponding old growth. Both scenarios are incorrect, so 
- in an attempt to correct it, I further seperated each bag originally labeled "new growth" and "old growth"
- into leaves and stems. This left me with values for "old leaves"" and "old stems"" and "new leaves" 
- and "new stems". From this, I isolated plots which had newLeaves > oldLeaves, which is a sign of
- poor seperation. Then I grouped together oldLeaves, oldStems, newStems and categorized that as 
- "old growth". From this, I determined a correct ratio for old to new and applied that ratio to
- only the plots that had newLeaves > oldLeaves.  
  
-```{r biomass correction: ledpal, results='hide'}
-
-ggplot(biomass, aes(y=(lp.newgrowth.leaves + lp.newgrowth.stems) ,
-                    x=(lp.oldgrowth.leaves +lp.oldgrowth.stems))) +
-  geom_point() +
-  geom_smooth(method = stats::lm, se = F)
-
-lp.correct <- anti_join(select(biomass, site:treatment, grep("lp.*", colnames(biomass))),
-          select(biomass, site:treatment, grep("lp.*", colnames(biomass))) %>% 
-  filter(lp.oldgrowth.leaves < lp.newgrowth.leaves)) %>%
+```{r biomass correction: ledpal, echo=T, results='hide'}
+biomass <- biomass %>%
   mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
          lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
-         lp.sum = lp.oldgrowth + lp.newgrowth)
+         sum = (lp.oldgrowth + lp.newgrowth))
 
-ggplot(lp.correct, aes(y=lp.newgrowth ,x=lp.oldgrowth)) +
-  geom_point() +
-  geom_smooth(method = stats::lm, se = F) +
-  stat_regline_equation()
-
-lm(lp.newgrowth~lp.oldgrowth, lp.correct)
-# y = 0.2144 + 0.1204 x
-
-biomass <- biomass %>% 
-  mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
-         lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
-         lp.sum = (lp.oldgrowth + lp.newgrowth))
+biomass %>%
+  filter(biomass["lp.newgrowth.leaves"] < biomass["lp.oldgrowth.leaves"]) %>%
+  lm(lp.newgrowth~lp.oldgrowth, data = .)
+# y = 0.2354 + 0.1196 x
 
 list <- which((biomass["lp.newgrowth.leaves"] > biomass["lp.oldgrowth.leaves"]))
-count <- 0
 for(i in list){
-  biomass[i,"lp.oldgrowth"] <- (biomass[i,"lp.sum"] - 0.2144)/1.2104
-  biomass[i,"lp.newgrowth"] <- 0.2144 + 0.1204 * biomass[i,"lp.oldgrowth"]
-  count <- count + 1
+  biomass[i,"lp.oldgrowth"] <- (biomass[i,"sum"] - 0.2354)/1.1196
+  biomass[i,"lp.newgrowth"] <- 0.2354 + 0.1196 * biomass[i,"lp.oldgrowth"]
 }
-print(count)
-biomass <- select(biomass, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
-                  -lp.oldgrowth.stems, -lp.sum)
 
-rm(i, count, list, lp.correct)
+biomass <- select(biomass, -sum, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
+                  -lp.oldgrowth.stems)
+rm(i, list)
 ```
 
 
-```{r biomass scaling, include=T, echo=T}
+```{r biomass scaling, echo=T, results='hide'}
 # If i want to produce graphs without corrections
+
 # biomass <- biomass %>%
 #   mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
 #          lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
@@ -204,49 +165,73 @@ rm(small_quad_spp,large_quad_spp)
 ```{r complete biomass and productivity data}
 
 pft.biomass <- mutate(biomass, 
-                            sedge = ev.blade + ev.rhizome + cb.blade + cb.rhizome,
-                            decid = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
+                      sedge = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
+                      decid = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
                               sp.oldstem,
-                            evergr = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
-                              lp.newgrowth + lp.oldgrowth + lp.infl + ap.newgrowth + ap.oldgrowth,
-                            forb = rc.above + rc.litter + pf.above,
-                            total = sedge + decid + evergr + forb) %>% 
-                     select(site:treatment, sedge:forb, total)
+                      evergr = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
+                              lp.newgrowth + lp.oldgrowth + lp.infl + lp.dead + ap.newgrowth + ap.oldgrowth,
+                      forb = rc.above + rc.litter + pf.above,
+                      nonv = moss + lichen,
+                      litter  = evergr.litter + decid.litter + rc.litter + pf.litter,
+                      biomass = sedge + decid + evergr + forb) %>% 
+               select(site:treatment, sedge:biomass)
+
+pft.biomass$site <- as.factor(pft.biomass$site)
+pft.biomass$treatment <- as.factor(pft.biomass$treatment)
 
 pft.anpp <- mutate(biomass,
                      sedge = ev.blade + ev.infl + cb.blade + cb.infl,
                      decid = bn.leaves + bn.newstems + bn.infl + sp.newstem + sp.leaves,
                      evergr = vv.newgrowth + vv.infl + lp.newgrowth + lp.infl + ct.newgrowth +
                        ap.newgrowth,
-                     forb = rc.above + rc.litter + rc.infl + pf.above,
-                     nonv = moss + lichen,
-                     total = sedge + decid + evergr + forb) %>% 
-                  select(site:treatment,sedge:forb, nonv, total)
+                     forb = rc.above + rc.infl + pf.above,
+                     anpp = sedge + decid + evergr + forb) %>% 
+                  select(site:treatment,sedge:anpp)
+
+pft.anpp$site <- as.factor(pft.anpp$site)
+pft.anpp$treatment <- as.factor(pft.anpp$treatment)
 ```
 
-```{r ANOVA}
-summary(aov(total ~ treatment, data = pft.anpp[pft.anpp$site=="S",]))
+```{r ANOVA and Kruskal-Wallis Test}
 
-aggregate(total ~ site + treatment, mean, data = pft.anpp)
+pft.anpp %>% filter() %>%
+  aov(total ~ Error(block) + site*treatment, data = .) %>% 
+  summary()
 
-# FROM burn-data-v4
-# > summary(aov(anpp ~ site + treatment, data = pluck))
-#             Df Sum Sq Mean Sq F value Pr(>F)
-# site         1   6307    6307   1.207  0.278
-# treatment    4  24678    6169   1.181  0.332
-# Residuals   44 229895    5225  
+pft.biomass %>% filter() %>%
+  aov(total ~ Error(block) + site*treatment, data = .) %>% 
+  summary()
 
-# FROM un-corrected 
-#             Df Sum Sq Mean Sq F value Pr(>F)
-# site         1    258     258   0.030  0.864
-# treatment    3  15645    5215   0.604  0.616
-# Residuals   45 388670    8637  
+# Does severe C biomass = unbured C biomass?
+pft.biomass %>% filter(treatment=="C") %>% 
+  kruskal.test(total ~ site, data = .)
 
-# FROM corrected
-#             Df Sum Sq Mean Sq F value Pr(>F)
-# site         1   8369    8369   1.726  0.196
-# treatment    3  32135   10712   2.209  0.100
-# Residuals   45 218189    4849
+# Does severe C anpp = unburned C anpp?
+pft.anpp %>% filter(treatment=="C") %>% 
+  kruskal.test(total ~ site, data = .)
+
+# Is anpp the same for all severe treatments?
+pft.anpp %>% filter(site=="S") %>% 
+  kruskal.test(total ~ treatment, data = .)
+
+# Is anpp the same for all unburned treatments?
+pft.anpp %>% filter(site=="U") %>% 
+  kruskal.test(total ~ treatment, data = .)
+
+aggregate(total ~ block + site + treatment, mean, data = pft.biomass)
+
+treat_aov <- function(data_frame, measurement){
+  mF <- formula(paste(measurement, " ~ as.factor(block) + site * treatment")) 
+  m <- aov(mF, data = data_frame)
+  print(summary(m))
+  #return(TukeyHSD(m))
+}
+treat_aov(pft.anpp, "total")
+
+model <- lm(anpp ~ site/as.factor(block)+treatment+site:treatment, data=pft.anpp)
+summary(model)
+
+pft.biomass %>%  select(site:treatment, biomass)
 
 ```
 
@@ -254,41 +239,26 @@ aggregate(total ~ site + treatment, mean, data = pft.anpp)
 ```{r productivity percents & correlations}
 
 pft.anpp %>% 
-  filter(site=="S") %>% 
   gather(sedge:forb, key="pft", value = "anpp") %>% 
-  ggplot(aes(fill=pft, y=anpp, x=treatment))+
-  geom_bar(position = "fill",stat = "identity", width = 0.5)+
-  ggtitle("severe -- percent total productivity") +
-  scale_fill_brewer(palette="Spectral")
-
-pft.anpp %>% 
-  filter(site=="U") %>% 
-  gather(sedge:forb, key="pft", value = "anpp") %>% 
-  ggplot(aes(fill=pft, y=anpp, x=treatment))+
-  geom_bar(position = "fill",stat = "identity", width = 0.5)+
-  ggtitle("unburned -- percent total productivity")+
+  ggplot(aes(fill=pft, y=anpp, x=treatment)) +
+  geom_bar(position = "fill",stat = "identity", width = 0.5) +
+  facet_grid(.~site) + 
+  ggtitle("percent total productivity") +
   scale_fill_brewer(palette="Spectral")
 
 pft.biomass %>% 
-  filter(site=="S") %>% 
   gather(sedge:forb, key="pft", value = "biomass") %>% 
   ggplot(aes(fill=pft, y=biomass, x=treatment))+
   geom_bar(position = "fill",stat = "identity", width = 0.5)+
-  ggtitle("severe -- percent total biomass") +
+  facet_grid(.~site) + 
+  ggtitle("percent total biomass") +
   scale_fill_brewer(palette="Spectral")
 
-pft.biomass %>% 
-  filter(site=="U") %>% 
-  gather(sedge:forb, key="pft", value = "biomass") %>% 
-  ggplot(aes(fill=pft, y=biomass, x=treatment))+ 
-  geom_bar(position = "fill",stat = "identity", width = 0.5)+
-  ggtitle("unburned -- percent total biomass")+
-  scale_fill_brewer(palette="Spectral")
 
 
 ```
 
-```{r productivity bar graphs w/error bars}
+```{r productivity bar graphs with error bars}
 my_comparisons <- list( c("C", "N"), c("C", "NP"), c("C", "P"))
 
 pft.anpp %>% 
@@ -305,7 +275,8 @@ pft.anpp %>%
             position = position_dodge(0.8), width = 0.5)+
   stat_compare_means(aes(group = treatment), label = "p.format", method = "anova") + 
   stat_compare_means(ref.group = "C", label = "p.format", label.y = -12, method = "t.test")+
-  ggtitle("unburned -- total productivity")
+  ggtitle("unburned -- total productivity") +
+  ggrepel::geom_text_repel(aes(label = block))
 
 pft.anpp %>% 
   filter(site=="S") %>% 
@@ -323,6 +294,13 @@ biomass %>%
 ```
 
 ```{r productivity bar graphs w/error bars}
+pft.anpp %>% 
+  filter(treatment=="C") %>% 
+  ggbarplot(x = "site" ,y = "total", add = c("mean_sd","jitter"),
+            ggtheme = theme_light(), width = 0.5) + 
+  stat_compare_means(ref.group = "S", label = "p.format", label.y = 15, method = "t.test")+
+  ggtitle("total C productivity")
+
 pft.anpp %>% 
   ggplot(aes(x = treatment, y = decid, fill = site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
@@ -351,9 +329,14 @@ pft.anpp %>%
   stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
   ggtitle("forb productivity -- g/m2")
 ```
+### **reflectance**
+***
+```{r reflectance, include=F, results='hide'}
+options(na.action = na.warn)
 
-
-
+reflectance <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
+reflectance <- as_tibble(reflectance)
+```
 
 
 
