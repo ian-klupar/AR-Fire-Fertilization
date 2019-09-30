@@ -1,0 +1,329 @@
+---
+title: "AR Fire Fertilization — Corrections"
+author: "Ian Klupar"
+date: "9/27/2019"
+output: html_document
+---
+
+```{r setup, echo=T, include=F, results='hide'}
+knitr::opts_chunk$set(echo = TRUE)
+
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+
+
+# function for computing standard error
+s.err <- function(x){
+  sd(x)/sqrt(length(x))
+}
+
+```
+```{r biomass, echo=T, include=F, results='hide'}
+library(tidyverse)
+library(modelr)
+library(ggpubr)
+library(broom)
+options(na.action = na.warn)
+
+biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv",
+                    header = T, stringsAsFactors = F)
+biomass <- as_tibble(biomass)
+```
+
+```{r complete biomass and productivity data}
+
+pft <- mutate(biomass, 
+                   sedge.biomass = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
+                   decid.biomass = bn.leaves + bn.newstem + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
+                                   sp.oldstem,
+                   evergr.biomass = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
+                                    lp.oldgrowth.leaves + lp.oldgrowth.stems + lp.newgrowth.stems +
+                                    lp.infl + lp.dead + ap.newgrowth + ap.oldgrowth,
+                   forb.biomass = rc.above + rc.litter + pf.above + pf.litter,
+                   nonv.biomass = moss + lichen,
+                   litter.biomass  = evergr.litter + decid.litter + rc.litter + pf.litter,
+                   total.biomass = sedge.biomass + decid.biomass + evergr.biomass + forb.biomass,
+              
+                   sedge.anpp = ev.blade + ev.infl + cb.blade + cb.infl,
+                   decid.anpp = bn.leaves + bn.newstem + bn.infl + sp.newstem + sp.leaves,
+                   evergr.anpp = vv.newgrowth + vv.infl + lp.newgrowth.leaves + lp.infl + ct.newgrowth +
+                                 ap.newgrowth,
+                   forb.anpp = rc.above + rc.infl + pf.above,
+                   total.anpp = sedge.anpp + decid.anpp + evergr.anpp + forb.anpp) %>% 
+               select(site:treatment, sedge.biomass:total.anpp)
+
+pft$site <- as.factor(pft$site)
+pft$treatment <- as.factor(pft$treatment)
+```
+### **ANPP PFT Corrections**
+***
+***  
+```{r sedge corrections, echo=T, include=T, results='hide'}
+pft %>% 
+  filter(site=="S") %>% 
+  do(augment(lm(sedge.anpp ~ sedge.biomass, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(sedge.anpp - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(sedge.biomass, sedge.anpp, shape=site)) + 
+  geom_point(aes(colour = factor(group)), size = 1.5) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  ggtitle("Sedge -- total")
+```
+
+```{r deciduous corrections, echo=T, include=T, results='hide'}
+pft %>% 
+  filter(site=="S") %>% 
+  do(augment(lm(decid.anpp ~ decid.biomass, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(decid.anpp - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(decid.biomass, decid.anpp, shape=site)) + 
+  geom_point(aes(colour = factor(group)), size = 1.5) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  ggtitle("Decid -- total")
+```
+
+```{r evergreen corrections, echo=T, include=T, results='hide'}
+pft %>% 
+  filter(site=="U") %>% 
+  do(augment(lm(evergr.anpp ~ evergr.biomass, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(evergr.anpp - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(evergr.biomass, evergr.anpp, shape=site)) +
+  geom_point(aes(colour = factor(group)), size = 1.5) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  ggtitle("Evergr -- total")
+```
+
+```{r forb corrections, echo=T, include=T, results='hide'}
+pft %>% 
+  filter(site=="S") %>% 
+  do(augment(lm(forb.anpp ~ forb.biomass, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(forb.anpp - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(forb.biomass, forb.anpp, shape=site)) + 
+  geom_point(aes(colour = factor(group)), size = 1.5) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  ggtitle("Forb -- total")
+```
+
+```{r plant functional type corrections, echo=T, include=T, results='hide'}
+pft %>% 
+  filter(site=="U") %>% 
+  do(augment(lm(total.anpp ~ total.biomass, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(total.anpp - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(total.biomass, total.anpp, shape=site)) + 
+  geom_point(aes(colour = factor(group)), size = 1.5) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  ggtitle("Combined -- total")
+```
+### **ANPP Species Corrections**
+***
+***  
+Fit a linear regression to an x~y relationship that I expect to be linear. For example: blades~litter in eriophorum. Next, determine which points are outside the 99% confidence interval for the regression. Next, remove those points, fit a new regression and then adjust the combined blades + litter biomass so it fits the appropriate relationship. I use y = mx + b and total = x + y to conserve biomass. Thus, x = (total - b)/(m + 1) and y = mx + b. 
+
+##### Corrections by species:
+*Eriophorum vaginatum*
+```{r biomass corrections: erivag, echo=TRUE, include=T, results='hide'}
+biomass %>% 
+  ggplot(aes(x=ev.rhizome+ev.litter+ev.dead.sheath, y=ev.blade, color=site)) +
+  geom_point(aes(shape=treatment)) +
+  stat_smooth(method = "lm", size = 1, level = .99, se = F)+
+  stat_regline_equation(aes(label = paste(..rr.label..)))
+  
+summary(lm(ev.blade~ev.rhizome+ev.litter+ev.dead.sheath, data = biomass))
+
+
+```
+
+```{r biomass corrections: erivag, echo=TRUE, include=T, results='hide'}
+biomass %>% 
+  do(augment(lm(ev.blade ~ ev.litter, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(ev.blade - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(ev.litter, ev.blade)) + geom_point(aes(colour = factor(group)), size = 2) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  stat_regline_equation(aes(label = paste(..rr.label..)))+
+  ggtitle("Eriophorum -- total")
+  
+biomass %>% 
+  do(augment(lm(ev.blade ~ ev.litter, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(ev.blade - .fitted) < 2.58*.se.fit)) %>% 
+  filter(group==1) %>% 
+  lm(ev.blade~ev.litter, data = .)
+# regression: y = 0.75535 + 0.09058 * x is the regression for points inside the 99% CI 
+
+x <- biomass %>%  
+  do(augment(lm(ev.blade ~ ev.litter, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(ev.blade - .fitted) < 2.58*.se.fit))
+
+list <- which(x$group==0)
+count <- 0
+
+for(i in list){
+      biomass[i,"ev.litter"] <- abs(((biomass[i,"ev.litter"]+biomass[i,"ev.blade"])-0.75535)/(0.09058+1))
+      biomass[i,"ev.blade"] <- abs(0.75535 + (0.09058*biomass[i,"ev.litter"]))
+      
+      count <- count + 1
+}
+
+paste0("Number of corrected plots: ",count)
+
+biomass %>% 
+  ggplot(aes(ev.litter, ev.blade))+
+  geom_point() +
+  geom_smooth(method = stats::lm, se=F) +
+  stat_regline_equation(aes(label = paste(..rr.label..)))
+
+ rm(i, list, x)
+```
+  
+*Petasites frigidus*
+
+```{r biomass correction: petfri, echo=T, results='hide'}
+
+# S-B4-C high "pf.above" value
+# remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
+
+biomass[5,"pf.above"] <- 5.87
+```
+
+*Vaccinium vitis-idea*
+
+```{r biomass correction: vacvit, echo=T, results='hide'}
+biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv",
+                    header = T, stringsAsFactors = F)
+biomass <- as_tibble(biomass)
+
+biomass %>% 
+  do(augment(lm(vv.newgrowth ~ vv.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(vv.newgrowth - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(vv.oldgrowth, vv.newgrowth)) + geom_point(aes(colour = factor(group)), size = 2) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  stat_regline_equation(aes(label = paste(..rr.label..)))+
+  ggtitle("Vaccinium -- total")
+  
+biomass %>% 
+  do(augment(lm(vv.newgrowth ~ vv.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(vv.newgrowth - .fitted) < 2.58*.se.fit)) %>% 
+  filter(group==1 | vv.newgrowth < 2*vv.oldgrowth) %>% 
+  lm(vv.newgrowth~vv.oldgrowth, data = .)
+
+# y = 0.81239 + 0.05224 * x 
+#  is the regression for points inside the 99% CI 
+
+x <- biomass %>%  
+  do(augment(lm(vv.newgrowth ~ vv.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(vv.newgrowth - .fitted) < 2.58*.se.fit))
+
+list <- which(x$group==0)
+count <- 0
+
+for(i in list){
+      biomass[i,"vv.oldgrowth"] <- abs((biomass[i,"vv.oldgrowth"]+biomass[i,"vv.newgrowth"])-0.81239)/(0.05224+1)
+      biomass[i,"vv.newgrowth"] <- abs(0.81239 + 0.05224*biomass[i,"vv.oldgrowth"])
+      
+      count <- count + 1
+}
+
+paste0("Number of corrected plots: ",count)
+
+biomass %>% 
+  ggplot(aes(vv.oldgrowth, vv.newgrowth))+
+  geom_point() +
+  stat_regline_equation(aes(label = paste(..rr.label..))) +
+  geom_smooth(method = stats::lm, se=F)
+
+ rm(i, list, x, count)
+```
+
+*Ledum palustre*
+ 
+```{r biomass correction: ledpal, echo=T, include=TRUE, results='hide'}
+biomass <- biomass %>%
+  mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
+         lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems))
+
+biomass %>% 
+  do(augment(lm(lp.newgrowth ~ lp.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(lp.newgrowth - .fitted) < 2.58*.se.fit)) %>%   
+  ggplot(aes(lp.oldgrowth, lp.newgrowth)) + geom_point(aes(colour = factor(group)), size = 2) +
+  stat_smooth(method = "lm", formula = y ~ x, size = 1, level = .99) +
+  stat_regline_equation(aes(label = paste(..rr.label..)))+
+  ggtitle("Ledum -- total")
+  
+biomass %>% 
+  do(augment(lm(lp.newgrowth ~ lp.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(lp.newgrowth - .fitted) < 2.58*.se.fit)) %>% 
+  filter(group==1) %>% 
+  lm(lp.newgrowth~lp.oldgrowth, data = .)
+
+# y = 3.32329 + 0.01526 * x 
+#  is the regression for points inside the 99% CI 
+
+x <- biomass %>%  
+  do(augment(lm(lp.newgrowth ~ lp.oldgrowth, data = .), data = .)) %>%
+  mutate(group = as.numeric(abs(lp.newgrowth - .fitted) < 2.58*.se.fit))
+
+list <- which(x$group==0)
+count <- 0
+
+for(i in list){
+      biomass[i,"lp.oldgrowth"] <- abs((biomass[i,"lp.oldgrowth"]+biomass[i,"lp.newgrowth"])-3.32329)/(0.01526+1)
+      biomass[i,"lp.newgrowth"] <- abs(3.32329 + 0.01526*biomass[i,"lp.oldgrowth"])
+      
+      count <- count + 1
+}
+
+paste0("Number of corrected plots: ",count)
+
+biomass %>% 
+  ggplot(aes(lp.oldgrowth, lp.newgrowth))+
+  geom_point() +
+  stat_regline_equation(aes(label = paste(..rr.label..))) +
+  geom_smooth(method = stats::lm, se=F)
+
+ rm(i, list, x, count)
+```
+
+
+```{r biomass scaling, echo=T, results='hide'}
+# If i want to produce graphs without corrections
+
+small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
+                    "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
+                    "cb.liveroots","cb.deadroots","vv.newgrowth","vv.oldgrowth","vv.infl","ct.newgrowth",
+                    "ct.oldgrowth","ct.dead","ap.newgrowth","ap.oldgrowth","rc.above","rc.litter","rc.below",
+                    "rc.infl","pf.above","pf.below","pf.litter","fine.roots","coarse.roots","moss","lichen",
+                    "fungi","evergr.litter","decid.litter")
+
+large_quad_spp <- c("bn.leaves","bn.newstem","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
+                    "sp.oldstem","lp.newgrowth","lp.oldgrowth","lp.dead","lp.infl","lp.below")
+
+biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
+biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
+
+biomass$treatment[biomass$treatment=="CX"] <- "C"
+
+rm(small_quad_spp,large_quad_spp)
+```
+
+
+```{r ANOVA and Linear Model}
+
+pft.anpp %>% filter() %>%
+  aov(anpp ~ Error(block) + site*treatment, data = .) %>% 
+  summary()
+
+pft.biomass %>% filter() %>%
+  aov(biomass ~ Error(block) + site*treatment, data = .) %>% 
+  summary()
+
+treat_aov <- function(data_frame, measurement){
+  mF <- formula(paste(measurement, " ~ as.factor(block) + site * treatment")) 
+  m <- aov(mF, data = data_frame)
+  print(summary(m))
+  #return(TukeyHSD(m))
+}
+treat_aov(pft.anpp, "total")
+
+model <- lm(anpp ~ site/as.factor(block)+treatment+site:treatment, data=pft.anpp)
+summary(model)
+
+```
