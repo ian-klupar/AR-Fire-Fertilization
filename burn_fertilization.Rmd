@@ -4,144 +4,10 @@ author: "Ian Klupar"
 output: html_document
 ---
 
-```{r setup, echo=T, include=F, results='hide'}
-knitr::opts_chunk$set(echo = TRUE)
 
-# clear all
-rm(list=ls())
-if(!is.null(dev.list())) dev.off()
-cat("\014")
-
-
-# function for computing standard error
-s.err <- function(x){
-  sd(x)/sqrt(length(x))
-}
-
-```
-
-```{r biomass, echo=F, include=T, results='hide'}
-library(tidyverse)
-library(modelr)
-library(ggpubr)
-
-options(na.action = na.warn)
-
-biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv",
-                    header = T, stringsAsFactors = F)
-biomass <- as_tibble(biomass)
-```
-### **Biomass**
-***
-##### Corrections by species:
-*Eriophorum vaginatum*
-
- Fit a linear regression with outliers exempt.  
- Best fit line is: ev.blade[y] = 0.7 + 0.092 * ev.litter[x]  
-
-"ev.blade" for U-B4-C, S-B4-P, U-B1-N, U-B4-P were all re-adjusted based on the amount of litter. 
-
-```{r biomass corrections: erivag, echo=T, results='hide'}
-
-# correct high "ev.blade" values based on "ev.litter"
-ev.correct <- select(biomass, site:treatment, ev.blade, ev.litter) %>%
-  mutate(sum = ev.blade + ev.litter)
-ev.correct <- ev.correct[-c(25,30,37,49),]
-
-# plot and linear model without over estimated values
-ev.lm <- lm(ev.blade~ev.litter,ev.correct)
-predict(ev.lm, ev.correct, interval="confidence")
-
-biomass <- biomass %>%
-  mutate(sum = (ev.blade + ev.litter))
-
-list <- c(25, 30, 37, 49)
-for(i in list){
- biomass[i,"ev.litter"] <- (biomass[i,"sum"]-0.7)/1.092
- biomass[i,"ev.blade"] <- 0.70565 + 0.09199*biomass[i,"ev.litter"]
-}
-
-biomass <- select(biomass, -sum)
-rm(i, list, ev.correct)
-```
-  
-*Petasites frigidus*
-
-```{r biomass correction: petfri, echo=T, results='hide'}
-
-# S-B4-C high "pf.above" value
-# remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
-
-biomass[5,"pf.above"] <- 5.87
-```
-
-*Vaccinium vitis-idea*
-
-Plots where new growth was twice as great as old growth were considered to be poorly seperated.
-To correct for this, a regression was generated with poor data exepmt. Poor data was then corrected using the
-generated regression.
- 
-Plots that had old growth but no new growth:
- SB1C,SB3NP  
- 
-Plots that had new growth > old growth:
- SB1P, SB2P, SB4P, SB0N, SB1NP, SB2NP, SB4NP, UB0C, UB0P, UB3P, UB0N, UB4NP  
-
-```{r biomass correction: vacvit, echo=T, results='hide'}
-
-biomass <- biomass %>%
-  mutate(sum = (vv.oldgrowth + vv.newgrowth))
-
-biomass %>%
-  filter(biomass["vv.newgrowth"] <= 2*biomass["vv.oldgrowth"]) %>%
-  lm(vv.newgrowth~vv.oldgrowth, data = .)
-# y = 0.3414 + 0.2380 x
-
-list <- which((biomass["vv.newgrowth"] > 2*biomass["vv.oldgrowth"]))
-
-for (i in list){
-  biomass[i,"vv.oldgrowth"] <- (biomass[i,"sum"] - 0.3414) / 1.238
-  biomass[i,"vv.newgrowth"] <- 0.3414 + (0.238 * biomass[i,"vv.oldgrowth"])
-}
-
-biomass <- select(biomass, -sum)
-rm(i, list)
-```
-
-*Ledum palustre*
- 
-```{r biomass correction: ledpal, echo=T, results='hide'}
-biomass <- biomass %>%
-  mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
-         lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
-         sum = (lp.oldgrowth + lp.newgrowth))
-
-biomass %>%
-  filter(biomass["lp.newgrowth.leaves"] < biomass["lp.oldgrowth.leaves"]) %>%
-  lm(lp.newgrowth~lp.oldgrowth, data = .)
-# y = 0.2354 + 0.1196 x
-
-list <- which((biomass["lp.newgrowth.leaves"] > biomass["lp.oldgrowth.leaves"]))
-for(i in list){
-  biomass[i,"lp.oldgrowth"] <- (biomass[i,"sum"] - 0.2354)/1.1196
-  biomass[i,"lp.newgrowth"] <- 0.2354 + 0.1196 * biomass[i,"lp.oldgrowth"]
-}
-
-biomass <- select(biomass, -sum, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
-                  -lp.oldgrowth.stems)
-rm(i, list)
-```
-
-
+#### Final Biomass Data
 ```{r biomass scaling, echo=T, results='hide'}
 # If i want to produce graphs without corrections
-
-# biomass <- biomass %>%
-#   mutate(lp.oldgrowth = (lp.oldgrowth.leaves + lp.oldgrowth.stems),
-#          lp.newgrowth = (lp.newgrowth.leaves + lp.newgrowth.stems),
-#          lp.sum = (lp.oldgrowth + lp.newgrowth))
-# biomass <- select(biomass, -lp.newgrowth.leaves, -lp.newgrowth.stems, -lp.oldgrowth.leaves,
-#                   -lp.oldgrowth.stems, -lp.sum)
 
 small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
                     "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
@@ -150,7 +16,7 @@ small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev
                     "rc.infl","pf.above","pf.below","pf.litter","fine.roots","coarse.roots","moss","lichen",
                     "fungi","evergr.litter","decid.litter")
 
-large_quad_spp <- c("bn.leaves","bn.newstems","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
+large_quad_spp <- c("bn.leaves","bn.newstem","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
                     "sp.oldstem","lp.newgrowth","lp.oldgrowth","lp.dead","lp.infl","lp.below")
 
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
@@ -160,7 +26,6 @@ biomass$treatment[biomass$treatment=="CX"] <- "C"
 
 rm(small_quad_spp,large_quad_spp)
 ```
-#### Final Biomass Data
 
 ```{r complete biomass and productivity data}
 
