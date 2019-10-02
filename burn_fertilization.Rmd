@@ -3,11 +3,33 @@ title: "AR Fire Fertilization Results"
 author: "Ian Klupar"
 output: html_document
 ---
+```{r setup, echo=F, include=F, results='hide'}
+knitr::opts_chunk$set(echo = TRUE)
 
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+
+library(tidyverse)
+library(modelr)
+library(ggpubr)
+library(broom)
+options(na.action = na.warn)
+
+```
 
 #### Final Biomass Data
+***
+***
 ```{r biomass scaling, echo=T, results='hide'}
 # If i want to produce graphs without corrections
+
+biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv",
+                    header = T, stringsAsFactors = F)
+biomass <- as_tibble(biomass)
+
+biomass[5,"pf.above"] <- 5.87 # was 11.577g
 
 small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
                     "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
@@ -17,7 +39,8 @@ small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev
                     "fungi","evergr.litter","decid.litter")
 
 large_quad_spp <- c("bn.leaves","bn.newstem","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
-                    "sp.oldstem","lp.newgrowth","lp.oldgrowth","lp.dead","lp.infl","lp.below")
+                    "sp.oldstem","lp.newgrowth.leaves","lp.newgrowth.stems","lp.oldgrowth.leaves",
+                    "lp.oldgrowth.stems","lp.dead","lp.infl","lp.below")
 
 biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
 biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
@@ -28,62 +51,123 @@ rm(small_quad_spp,large_quad_spp)
 ```
 
 ```{r complete biomass and productivity data}
+pft <- mutate(biomass, 
+                   sedge.biomass = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
+                   decid.biomass = bn.leaves + bn.newstem + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
+                                   sp.oldstem,
+                   evergr.biomass = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
+                                    lp.oldgrowth.leaves + lp.oldgrowth.stems + lp.newgrowth.stems +
+                                    lp.infl + lp.dead + ap.newgrowth + ap.oldgrowth,
+                   forb.biomass = rc.above + rc.litter + pf.above + pf.litter,
+                   nonv.biomass = moss + lichen,
+                   litter.biomass  = evergr.litter + decid.litter + rc.litter + pf.litter,
+                   total.biomass = sedge.biomass + decid.biomass + evergr.biomass + forb.biomass,
+              
+                   sedge.anpp = ev.blade + ev.infl + cb.blade + cb.infl,
+                   decid.anpp = bn.leaves + bn.newstem + bn.infl + sp.newstem + sp.leaves,
+                   evergr.anpp = vv.newgrowth + vv.infl + lp.newgrowth.leaves + lp.infl + ct.newgrowth +
+                                 ap.newgrowth,
+                   forb.anpp = rc.above + rc.infl + pf.above,
+                   total.anpp = sedge.anpp + decid.anpp + evergr.anpp + forb.anpp) %>% 
+               select(site:treatment, sedge.biomass:total.anpp)
 
-pft.biomass <- mutate(biomass, 
-                      sedge = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
-                      decid = bn.leaves + bn.newstems + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
-                              sp.oldstem,
-                      evergr = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
-                              lp.newgrowth + lp.oldgrowth + lp.infl + lp.dead + ap.newgrowth + ap.oldgrowth,
-                      forb = rc.above + rc.litter + pf.above,
-                      nonv = moss + lichen,
-                      litter  = evergr.litter + decid.litter + rc.litter + pf.litter,
-                      biomass = sedge + decid + evergr + forb) %>% 
-               select(site:treatment, sedge:biomass)
-
-pft.biomass$site <- as.factor(pft.biomass$site)
-pft.biomass$treatment <- as.factor(pft.biomass$treatment)
-
-pft.anpp <- mutate(biomass,
-                     sedge = ev.blade + ev.infl + cb.blade + cb.infl,
-                     decid = bn.leaves + bn.newstems + bn.infl + sp.newstem + sp.leaves,
-                     evergr = vv.newgrowth + vv.infl + lp.newgrowth + lp.infl + ct.newgrowth +
-                       ap.newgrowth,
-                     forb = rc.above + rc.infl + pf.above,
-                     anpp = sedge + decid + evergr + forb) %>% 
-                  select(site:treatment,sedge:anpp)
-
-pft.anpp$site <- as.factor(pft.anpp$site)
-pft.anpp$treatment <- as.factor(pft.anpp$treatment)
+pft$site <- as.factor(pft$site)
+pft$treatment <- as.factor(pft$treatment)
 ```
 
-```{r ANOVA and Kruskal-Wallis Test}
+```{r specific leaf area, echo=T, include=T, results='hide'}
+# SLA calculated by scanning leaves of each species, converting pixels to m^2 in ENVI and then dividing by the weight of the leaves. 
 
-pft.anpp %>% filter() %>%
-  aov(total ~ Error(block) + site*treatment, data = .) %>% 
+lai.wt <- biomass %>% 
+  select(site:treatment, ev.blade, cb.blade, bn.leaves, sp.leaves, vv.newgrowth, ct.newgrowth, lp.oldgrowth.leaves, 
+         lp.newgrowth.leaves, rc.above, pf.above) %>% 
+  mutate(ev.lai = ev.blade * 0.009574,
+         cb.lai = cb.blade * 0.010659903,
+         bn.lai = bn.leaves * 0.013182132,
+         sp.lai = sp.leaves * 0.010382839,
+         vv.lai = vv.newgrowth * 0.005944826,
+         ct.lai = ct.newgrowth * 0.00232137,
+         lp.lai = (lp.oldgrowth.leaves + lp.newgrowth.leaves) * 0.006155491,
+         rc.lai = rc.above * 0.012550352,
+         pf.lai = pf.above * 0.01936662,
+         sedge.lai = ev.lai + cb.lai,
+         decid.lai = bn.lai + sp.lai,
+         evergr.lai = vv.lai + ct.lai + lp.lai,
+         forb.lai =  rc.lai + pf.lai,
+         total.lai = sedge.lai + decid.lai + evergr.lai + forb.lai) %>% 
+  select(site:treatment, ev.lai:total.lai)
+```
+
+``` {r decid SLA, echo=T, include=T, results='show'}
+lai.wt %>% 
+  ggplot(aes(x=treatment, y=decid.lai, fill = site))+
+  facet_grid(cols = vars(site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
+  ggtitle("decid lai.wt")
+
+ggdensity(lai.wt, x = "decid.lai",
+            add = "mean", rug = T, color = "site")
+```
+
+``` {r sedge SLA,  echo=T, include=T, results='show'}
+lai.wt %>% 
+  ggplot(aes(x=treatment, y=sedge.lai, fill = site))+
+  facet_grid(cols = vars(site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
+  ggtitle("sedge lai.wt")
+
+ggdensity(lai.wt, x = "sedge.lai",
+            add = "mean", rug = T, color = "site")
+```
+
+``` {r evergr SLA,  echo=T, include=T, results='show'}
+lai.wt %>% 
+  ggplot(aes(x=treatment, y=evergr.lai, fill = site))+
+  facet_grid(cols = vars(site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
+  ggtitle("evergr lai.wt")
+
+ggdensity(lai.wt, x = "evergr.lai",
+            add = "mean", rug = T, color = "site")
+```
+
+``` {r forb SLA,  echo=T, include=T, results='show'}
+lai.wt %>% 
+  ggplot(aes(x=treatment, y=forb.lai, fill = site))+
+  facet_grid(cols = vars(site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
+  ggtitle("forb lai.wt")
+
+ggdensity(lai.wt, x = "forb.lai",
+            add = "mean", rug = T, color = "site")
+
+```
+
+```{r ANOVA and Kruskal-Wallis Test, echo=T, include=T}
+
+pft %>% filter() %>%
+  aov(total.anpp ~ Error(block) + site*treatment, data = .) %>% 
   summary()
 
-pft.biomass %>% filter() %>%
-  aov(total ~ Error(block) + site*treatment, data = .) %>% 
+pft %>% filter() %>%
+  aov(total.biomass ~ Error(block) + site*treatment, data = .) %>% 
   summary()
 
 # Does severe C biomass = unbured C biomass?
-pft.biomass %>% filter(treatment=="C") %>% 
-  kruskal.test(total ~ site, data = .)
-
-# Does severe C anpp = unburned C anpp?
-pft.anpp %>% filter(treatment=="C") %>% 
-  kruskal.test(total ~ site, data = .)
+pft %>% filter(treatment=="C") %>% 
+  kruskal.test(total.biomass ~ site, data = .)
 
 # Is anpp the same for all severe treatments?
-pft.anpp %>% filter(site=="S") %>% 
-  kruskal.test(total ~ treatment, data = .)
-
-# Is anpp the same for all unburned treatments?
-pft.anpp %>% filter(site=="U") %>% 
-  kruskal.test(total ~ treatment, data = .)
-
-aggregate(total ~ block + site + treatment, mean, data = pft.biomass)
+pft %>% filter(site=="S") %>% 
+  kruskal.test(total.anpp ~ treatment, data = .)
 
 treat_aov <- function(data_frame, measurement){
   mF <- formula(paste(measurement, " ~ as.factor(block) + site * treatment")) 
@@ -91,51 +175,49 @@ treat_aov <- function(data_frame, measurement){
   print(summary(m))
   #return(TukeyHSD(m))
 }
-treat_aov(pft.anpp, "total")
+treat_aov(pft, "total.anpp")
 
-model <- lm(anpp ~ site/as.factor(block)+treatment+site:treatment, data=pft.anpp)
+model <- lm(total.anpp ~ site/as.factor(block)+treatment+site:treatment, data=pft)
 summary(model)
 
-pft.biomass %>%  select(site:treatment, biomass)
+pft %>%  select(site:treatment, total.biomass)
 
 ```
 
 #### Biomass Graphs
 ```{r productivity percents & correlations}
 
-pft.anpp %>% 
-  gather(sedge:forb, key="pft", value = "anpp") %>% 
+pft %>% 
+  gather(sedge.anpp:forb.anpp, key="pft", value = "anpp") %>% 
   ggplot(aes(fill=pft, y=anpp, x=treatment)) +
   geom_bar(position = "fill",stat = "identity", width = 0.5) +
   facet_grid(.~site) + 
   ggtitle("percent total productivity") +
   scale_fill_brewer(palette="Spectral")
 
-pft.biomass %>% 
-  gather(sedge:forb, key="pft", value = "biomass") %>% 
+pft %>% 
+  gather(sedge.biomass:forb.biomass, key="pft", value = "biomass") %>% 
   ggplot(aes(fill=pft, y=biomass, x=treatment))+
   geom_bar(position = "fill",stat = "identity", width = 0.5)+
   facet_grid(.~site) + 
   ggtitle("percent total biomass") +
   scale_fill_brewer(palette="Spectral")
-
-
-
 ```
 
 ```{r productivity bar graphs with error bars}
 my_comparisons <- list( c("C", "N"), c("C", "NP"), c("C", "P"))
 
-pft.anpp %>% 
-  ggplot(aes(x = treatment, y = total, fill=site)) +
+pft %>% 
+  ggplot(aes(x = treatment, y = total.anpp, fill=site)) +
+  facet_grid(cols = vars(site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = site), label = "p.format", label.y = -10, method = "t.test") +
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -10, method = "anova") +
   ggtitle("total productivity -- g/m2")
 
-pft.anpp %>% 
+pft %>% 
   filter(site=="U") %>% 
-  ggbarplot(x = "treatment" ,y = "total", add = c("mean_sd","jitter"),
+  ggbarplot(x = "treatment" ,y = "total.anpp", add = c("mean_sd","jitter"),
             ggtheme = theme_light(),
             position = position_dodge(0.8), width = 0.5)+
   stat_compare_means(aes(group = treatment), label = "p.format", method = "anova") + 
@@ -143,9 +225,9 @@ pft.anpp %>%
   ggtitle("unburned -- total productivity") +
   ggrepel::geom_text_repel(aes(label = block))
 
-pft.anpp %>% 
+pft %>% 
   filter(site=="S") %>% 
-  ggbarplot(x = "treatment" ,y = "total", add = c("mean_sd","jitter"),
+  ggbarplot(x = "treatment" ,y = "total.anpp", add = c("mean_sd","jitter"),
             ggtheme = theme_light(),
             position = position_dodge(0.8), width = 0.5)+
   stat_compare_means(aes(group = treatment), label = "p.format", method = "anova") + 
@@ -153,56 +235,102 @@ pft.anpp %>%
   ggtitle("severe -- total productivity") +
   ggrepel::geom_text_repel(aes(label = block))
 
-biomass %>% 
-  filter(site=="S", block == 3, treatment == "NP")
-
+pft %>% 
+  filter(site=="S", block == 2, treatment == "NP")
 ```
 
-```{r productivity bar graphs w/error bars}
-pft.anpp %>% 
+```{r control productivity}
+pft %>% 
   filter(treatment=="C") %>% 
-  ggbarplot(x = "site" ,y = "total", add = c("mean_sd","jitter"),
-            ggtheme = theme_light(), width = 0.5) + 
+  ggbarplot(x = "site" ,y = "total.anpp", add = c("mean_sd","jitter"),
+             width = 0.5) + 
   stat_compare_means(ref.group = "S", label = "p.format", label.y = 15, method = "t.test")+
   ggtitle("total C productivity")
+```
 
-pft.anpp %>% 
-  ggplot(aes(x = treatment, y = decid, fill = site)) +
+```{r decid anpp}
+pft %>% 
+  ggplot(aes(x = treatment, y = decid.anpp, fill = site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
   stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
   ggtitle("decid productivity -- g/m2")
+```
 
-pft.anpp %>% 
-  ggplot(aes(x = treatment, y = sedge, fill = site)) +
+```{r sedge anpp}
+pft %>% 
+  ggplot(aes(x = treatment, y = sedge.anpp, fill = site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
   stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
   ggtitle("sedge productivity -- g/m2")
+```
 
-pft.anpp %>% 
-  ggplot(aes(x = treatment, y = evergr, fill = site)) +
+```{r evergr anpp}
+pft %>% 
+  ggplot(aes(x = treatment, y = evergr.anpp, fill = site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
   stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
   ggtitle("evergr productivity -- g/m2")
+```
 
-pft.anpp %>% 
-  ggplot(aes(x = treatment, y = forb, fill = site)) +
+```{r forb anpp}
+pft %>% 
+  ggplot(aes(x = treatment, y = forb.anpp, fill = site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
   stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
   ggtitle("forb productivity -- g/m2")
 ```
+
 ### **reflectance**
 ***
-```{r reflectance, include=F, results='hide'}
-options(na.action = na.warn)
+```{r reflectance, eval=FALSE, include=FALSE, results='hide'}
+library(data.table)
 
-reflectance <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
-reflectance <- as_tibble(reflectance)
+spec <- fread("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
+spec <- as_tibble(spec)
+
+spec <- spec %>% 
+  filter(year==2018) %>%
+  gather('350':'2500',key = "wavelength" ,value = "reflectance")
+
+spec$wavelength <- as.numeric(spec$wavelength)
+spec$site <- as.factor(spec$site)
+
+spec$reflectance[spec$wavelength>1325 & spec$wavelength<1500] <- NA
+spec$reflectance[spec$wavelength>1775 & spec$wavelength<2050] <- NA
+spec$reflectance[spec$wavelength>2350] <- NA
+
+head(spec)
+  
+  
+red <- spec[spec$wavelength>=620 & spec$wavelength<=670, ]
+red <- aggregate(reflectance ~ site * block * treatment * file_name, red, mean)
+
+green <- spec[spec$wavelength>=545 & spec$wavelength<=565, ]
+
+blue <- spec[spec$wavelength>=459 & spec$wavelength<=479, ]
+
+nir <- spec[spec$wavelength>=841 & spec$wavelength<=876, ]
+nir <- aggregate(reflectance ~ site * block * treatment * file_name, nir, mean)
+
+swir1 <- spec[spec$wavelength>=1230 & spec$wavelength<=1250, ]
+
+swir2 <- spec[spec$wavelength>=1628 & spec$wavelength<=1652, ]
+
+swir3 <- spec[spec$wavelength>=2105 & spec$wavelength<=2155, ]
 ```
 
+```{r spectral indicies, eval=FALSE, include=FALSE, results=F}
+ndvi <- (nir$reflectance-red$reflectance)/(nir$reflectance+red$reflectance)
+
+ggplot(ndvi) +
+  geom_histogram()
+
+
+```
 
 
 

@@ -33,7 +33,6 @@ biomass <- as_tibble(biomass)
 ```
 
 ```{r complete biomass and productivity data}
-
 pft <- mutate(biomass, 
                    sedge.biomass = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
                    decid.biomass = bn.leaves + bn.newstem + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
@@ -181,7 +180,7 @@ biomass %>%
 # S-B4-C high "pf.above" value
 # remeasured weight using g = LAI/SLA; LAI=3.42, SLA(R.chamamourus)=0.01538
 
-biomass[5,"pf.above"] <- 5.87
+biomass[5,"pf.above"] <- 5.87 # was 11.577g
 ```
 
 *Vaccinium vitis-idea*
