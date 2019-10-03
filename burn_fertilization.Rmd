@@ -1,7 +1,10 @@
 ---
 title: "AR Fire Fertilization Results"
 author: "Ian Klupar"
-output: html_document
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
 ---
 ```{r setup, echo=F, include=F, results='hide'}
 knitr::opts_chunk$set(echo = TRUE)
@@ -73,6 +76,9 @@ pft <- mutate(biomass,
 
 pft$site <- as.factor(pft$site)
 pft$treatment <- as.factor(pft$treatment)
+
+
+aggregate(sedge.anpp ~ site * treatment, pft, mean)
 ```
 
 ```{r specific leaf area, echo=T, include=T, results='hide'}
@@ -96,6 +102,19 @@ lai.wt <- biomass %>%
          forb.lai =  rc.lai + pf.lai,
          total.lai = sedge.lai + decid.lai + evergr.lai + forb.lai) %>% 
   select(site:treatment, ev.lai:total.lai)
+```
+
+``` {r decid SLA, echo=T, include=T, results='show'}
+lai.wt %>% 
+  ggplot(aes(x=treatment, y=total.lai, fill = site))+
+  facet_grid(cols = vars(site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
+  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
+  ggtitle("total lai.wt")
+
+ggdensity(lai.wt, x = "total.lai",
+            add = "mean", rug = T, color = "site")
 ```
 
 ``` {r decid SLA, echo=T, include=T, results='show'}
@@ -251,36 +270,40 @@ pft %>%
 ```{r decid anpp}
 pft %>% 
   ggplot(aes(x = treatment, y = decid.anpp, fill = site)) +
+  facet_grid(cols = vars(site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
+  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
   ggtitle("decid productivity -- g/m2")
 ```
 
 ```{r sedge anpp}
 pft %>% 
   ggplot(aes(x = treatment, y = sedge.anpp, fill = site)) +
+  facet_grid(cols = vars(site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
+  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
   ggtitle("sedge productivity -- g/m2")
 ```
 
 ```{r evergr anpp}
 pft %>% 
   ggplot(aes(x = treatment, y = evergr.anpp, fill = site)) +
+  facet_grid(cols = vars(site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
+  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
   ggtitle("evergr productivity -- g/m2")
 ```
 
 ```{r forb anpp}
 pft %>% 
   ggplot(aes(x = treatment, y = forb.anpp, fill = site)) +
+  facet_grid(cols = vars(site)) +
   stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
   stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = site), label = "p.signif", label.y = -5)+
+  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
   ggtitle("forb productivity -- g/m2")
 ```
 
