@@ -1,0 +1,369 @@
+---
+title: "burn fertilization spectral"
+author: "Ian Klupar"
+date: "10/8/2019"
+output: html_document
+---
+```{r setup, echo=F, include=F, results='hide'}
+knitr::opts_chunk$set(echo = TRUE)
+
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+
+library(tidyverse)
+library(modelr)
+library(ggpubr)
+library(broom)
+options(na.action = na.warn)
+
+```
+
+### **reflectance**
+***
+***
+```{r reflectance set-up, echo=T, eval=T, include=T, results='show'}
+library(data.table)
+
+spec <- fread("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
+spec <- as_tibble(spec)
+
+vi <- spec %>%   
+  mutate(blue = rowMeans(spec[,116:136]),     # blue = 459nm-479nm
+         green = rowMeans(spec[,202:222]),    # green = 545nm-565nm
+         red = rowMeans(spec[,277:327]),      # red = 620nm-670nm
+         nir = rowMeans(spec[,498:533]),      # nir = 841nm-876nm
+         swir1 = rowMeans(spec[,887:907]),    # swir1 = 1230nm-1250nm
+         swir2 = rowMeans(spec[,1285:1309]),  # swir2 = 1628nm-1652nm
+         swir3 = rowMeans(spec[,1762:1812]),  # swir3 = 2105nm-2155nm
+         p510 = rowMeans(spec[,167]),
+         p550 = rowMeans(spec[,207]),
+         p700 = rowMeans(spec[,357]),
+         p1510 = rowMeans(spec[,1167]),
+         p1680 = rowMeans(spec[,1337]),
+         ndvi = (nir - red)/(nir + red),
+         evi = 2.5 * ((nir - red)/(nir + 6*red - 7.5*blue + 1)),
+         evi2 = 2.5 * ((nir - red)/(nir + 2.4*red + 1)),
+         gci = (nir/green) - 1,
+         gli = ((green - red) + (green - blue))/((2*green) + red + blue),
+         ari = (1/p550)-(1/p700),
+         cri = (1/p510)-(1/p550),
+         ndni = (log(1/p1510) - log(1/p1680)) / (log(1/p1510) + log(1/p1680)),
+         lai = 3.618*evi - 0.118) %>% 
+  select(site:file_name,blue:lai)
+
+vi$site <- as.factor(vi$site)
+vi$block <- as.factor(vi$block)
+vi$treatment <- as.factor(vi$treatment)
+vi$year <- as.factor(vi$year)
+
+library(dplyr)
+
+vi %>% filter(year == 2019) %>% 
+ggdensity(x = "lai", add = "mean", color="treatment", fill="treatment")
+
+vi %>% filter(year == 2019) %>% 
+ggdensity(x = "ndvi", add = "mean", color="treatment", fill="treatment")
+
+vi %>% filter(year == 2019) %>% 
+ggdensity(x = "evi2", add = "mean", color="treatment", fill="treatment")
+
+vi <- vi %>% 
+dplyr::group_by(site, block, treatment, year) %>% 
+  dplyr::summarize(blue = mean(blue),
+            red = mean(red),
+            green = mean(green),
+            nir = mean(nir),
+            swir1 = mean(swir1),
+            swir2 = mean(swir2),
+            swir3 = mean(swir3),
+            p510 =  mean(p510),
+            p550 = mean(p550),
+            p700 = mean(p700),
+            p1510 = mean(p1510),
+            p1680 = mean(p1680),
+            ndvi = mean(ndvi),
+            evi = mean(evi),
+            evi2 = mean(evi2),
+            gci = mean(gci),
+            gli = mean(gli),
+            ari = mean(ari),
+            cri = mean(cri),
+            ndni = mean(ndni),
+            lai = mean(lai))
+
+rm(spec)
+```
+
+```{r reflectance, echo=T, eval=F, include=T, results='show'}
+vi %>% 
+  ggplot(aes(x = treatment, y = ndvi, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 0.85) +      
+  coord_cartesian(ylim=c(0.6, 0.9)) +
+  ggtitle("ndvi") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = evi, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 0.8) +      
+  coord_cartesian(ylim=c(0.4, 0.8)) +
+  ggtitle("enhanced vegetation") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = evi2, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 0.8) +      
+  coord_cartesian(ylim=c(0.45, 0.8)) +
+  ggtitle("enhanced vegetation 2") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = gci, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 6) +      
+  coord_cartesian(ylim=c(3, 6)) +
+  ggtitle("green chlorophyll index") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = gli, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 0.4) +      
+  coord_cartesian(ylim=c(0.1, 0.4)) +
+  ggtitle("green leaf index") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = ndni, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 0.225) +      
+  coord_cartesian(ylim=c(0.15, 0.225)) +
+  ggtitle("normalized difference nitrogen index") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = lai, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 2.75) +      
+  coord_cartesian(ylim=c(1.25, 2.75)) +
+  ggtitle("leaf area index") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = ari, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 5.5) +      
+  coord_cartesian(ylim=c(2, 5.5)) +
+  ggtitle("anthrocyanin") 
+
+vi %>% 
+  ggplot(aes(x = treatment, y = cri, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 16) +      
+  coord_cartesian(ylim=c(7.5, 16)) +
+  ggtitle("caretenoids")
+```
+
+```{r principle component: singular value decomposition, echo=T, eval=T, include=T, results='show'}
+library(factoextra)
+library(ggbiplot)
+
+class(vi)
+head(vi)
+```
+
+```{r}
+spec <- vi %>% ungroup() 
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$site, ellipse = T) +
+  ggtitle("")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+
+```{r principle component: singular value decomposition, echo=T, eval=T, include=T, results='show'}
+spec <- vi %>% ungroup() %>% filter(year==2019)
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$site, ellipse = T) +
+  ggtitle("2019")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+```{r}
+spec <- vi %>% ungroup() %>% filter(year==2019)
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$treatment, ellipse = T) +
+  ggtitle("severe and unburned combined PCA 2019")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+```{r}
+spec <- vi %>% ungroup() %>% filter(year==2018, site=="S")
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$treatment, ellipse = T) +
+  ggtitle("severe spectral PCA 2018")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+```{r}
+spec <- vi %>% ungroup() %>% filter(year==2018, site=="U")
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$treatment, ellipse = T) +
+  ggtitle("unburned spectral PCA 2018")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+```{r}
+spec <- vi %>% ungroup() %>% filter(year==2019, site=="S")
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$treatment, ellipse = T) +
+  ggtitle("severe spectral PCA 2019")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+```
+
+```{r}
+spec <- vi %>% ungroup() %>% filter(year==2019)
+spec.pca <- prcomp(spec[,-c(1:4)], scale= T)
+loadings <- as_tibble(spec.pca$x[,1:2]) %>% 
+  bind_cols(spec[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2)) %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P)
+
+ggbiplot(spec.pca, groups = spec$treatment, ellipse = T) +
+  ggtitle("")
+ggplot(loadings, aes(x = treatment, y = euclid, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15) +
+  stat_compare_means(aes(group = treatment),method = "anova", label.y = 6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
