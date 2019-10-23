@@ -1,13 +1,12 @@
 ---
-title: "AR Fire Fertilization Results"
-author: "Ian Klupar"
-output:
-  word_document: default
-  pdf_document: default
-  html_document: default
+title: "burn_fertilization"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
-```{r setup, echo=F, include=F, results='hide'}
-knitr::opts_chunk$set(echo = TRUE)
+
+```{r setup, echo=F, include=F, eval=T, results='hide'}
+knitr::opts_chunk$set(echo = F)
 
 # clear all
 rm(list=ls())
@@ -15,345 +14,468 @@ if(!is.null(dev.list())) dev.off()
 cat("\014")
 
 library(tidyverse)
+library(fs)
 library(modelr)
 library(ggpubr)
 library(broom)
-options(na.action = na.warn)
-
-```
-
-#### Final Biomass Data
-***
-***
-```{r biomass scaling, echo=T, results='hide'}
-# If i want to produce graphs without corrections
-
-biomass <- read.csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/biomass/burn_fertilization_biomass.csv",
-                    header = T, stringsAsFactors = F)
-biomass <- as_tibble(biomass)
-
-biomass[5,"pf.above"] <- 5.87 # was 11.577g
-
-small_quad_spp <- c("ev.blade","ev.litter","ev.infl","ev.rhizome","ev.roots","ev.dead.sheath",
-                    "ev.decomp.sheath","ev.tussockom","cb.blade","cb.litter","cb.sheath","cb.infl","cb.rhizome",
-                    "cb.liveroots","cb.deadroots","vv.newgrowth","vv.oldgrowth","vv.infl","ct.newgrowth",
-                    "ct.oldgrowth","ct.dead","ap.newgrowth","ap.oldgrowth","rc.above","rc.litter","rc.below",
-                    "rc.infl","pf.above","pf.below","pf.litter","fine.roots","coarse.roots","moss","lichen",
-                    "fungi","evergr.litter","decid.litter")
-
-large_quad_spp <- c("bn.leaves","bn.newstem","bn.oldstem","bn.below","bn.infl","sp.newstem","sp.leaves",
-                    "sp.oldstem","lp.newgrowth.leaves","lp.newgrowth.stems","lp.oldgrowth.leaves",
-                    "lp.oldgrowth.stems","lp.dead","lp.infl","lp.below")
-
-biomass[small_quad_spp] <- select(biomass, small_quad_spp) * 25
-biomass[large_quad_spp] <- select(biomass, large_quad_spp) * 4
-
-biomass$treatment[biomass$treatment=="CX"] <- "C"
-
-rm(small_quad_spp,large_quad_spp)
-```
-
-```{r complete biomass and productivity data}
-pft <- mutate(biomass, 
-                   sedge.biomass = ev.blade + ev.rhizome + ev.infl + cb.blade + cb.rhizome + cb.infl,
-                   decid.biomass = bn.leaves + bn.newstem + bn.oldstem + bn.infl + sp.leaves + sp.newstem +
-                                   sp.oldstem,
-                   evergr.biomass = vv.newgrowth + vv.oldgrowth + vv.infl + ct.newgrowth + ct.oldgrowth +
-                                    lp.oldgrowth.leaves + lp.oldgrowth.stems + lp.newgrowth.stems +
-                                    lp.infl + lp.dead + ap.newgrowth + ap.oldgrowth,
-                   forb.biomass = rc.above + rc.litter + pf.above + pf.litter,
-                   nonv.biomass = moss + lichen,
-                   litter.biomass  = evergr.litter + decid.litter + rc.litter + pf.litter,
-                   total.biomass = sedge.biomass + decid.biomass + evergr.biomass + forb.biomass,
-              
-                   sedge.anpp = ev.blade + ev.infl + cb.blade + cb.infl,
-                   decid.anpp = bn.leaves + bn.newstem + bn.infl + sp.newstem + sp.leaves,
-                   evergr.anpp = vv.newgrowth + vv.infl + lp.newgrowth.leaves + lp.infl + ct.newgrowth +
-                                 ap.newgrowth,
-                   forb.anpp = rc.above + rc.infl + pf.above,
-                   total.anpp = sedge.anpp + decid.anpp + evergr.anpp + forb.anpp) %>% 
-               select(site:treatment, sedge.biomass:total.anpp)
-
-pft$site <- as.factor(pft$site)
-pft$treatment <- as.factor(pft$treatment)
-
-
-aggregate(sedge.anpp ~ site * treatment, pft, mean)
-```
-
-```{r specific leaf area, echo=T, include=T, results='hide'}
-# SLA calculated by scanning leaves of each species, converting pixels to m^2 in ENVI and then dividing by the weight of the leaves. 
-
-lai.wt <- biomass %>% 
-  select(site:treatment, ev.blade, cb.blade, bn.leaves, sp.leaves, vv.newgrowth, ct.newgrowth, lp.oldgrowth.leaves, 
-         lp.newgrowth.leaves, rc.above, pf.above) %>% 
-  mutate(ev.lai = ev.blade * 0.009574,
-         cb.lai = cb.blade * 0.010659903,
-         bn.lai = bn.leaves * 0.013182132,
-         sp.lai = sp.leaves * 0.010382839,
-         vv.lai = vv.newgrowth * 0.005944826,
-         ct.lai = ct.newgrowth * 0.00232137,
-         lp.lai = (lp.oldgrowth.leaves + lp.newgrowth.leaves) * 0.006155491,
-         rc.lai = rc.above * 0.012550352,
-         pf.lai = pf.above * 0.01936662,
-         sedge.lai = ev.lai + cb.lai,
-         decid.lai = bn.lai + sp.lai,
-         evergr.lai = vv.lai + ct.lai + lp.lai,
-         forb.lai =  rc.lai + pf.lai,
-         total.lai = sedge.lai + decid.lai + evergr.lai + forb.lai) %>% 
-  select(site:treatment, ev.lai:total.lai)
-```
-
-``` {r decid SLA, echo=T, include=T, results='show'}
-lai.wt %>% 
-  ggplot(aes(x=treatment, y=total.lai, fill = site))+
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
-  ggtitle("total lai.wt")
-
-ggdensity(lai.wt, x = "total.lai",
-            add = "mean", rug = T, color = "site")
-```
-
-``` {r decid SLA, echo=T, include=T, results='show'}
-lai.wt %>% 
-  ggplot(aes(x=treatment, y=decid.lai, fill = site))+
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
-  ggtitle("decid lai.wt")
-
-ggdensity(lai.wt, x = "decid.lai",
-            add = "mean", rug = T, color = "site")
-```
-
-``` {r sedge SLA,  echo=T, include=T, results='show'}
-lai.wt %>% 
-  ggplot(aes(x=treatment, y=sedge.lai, fill = site))+
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
-  ggtitle("sedge lai.wt")
-
-ggdensity(lai.wt, x = "sedge.lai",
-            add = "mean", rug = T, color = "site")
-```
-
-``` {r evergr SLA,  echo=T, include=T, results='show'}
-lai.wt %>% 
-  ggplot(aes(x=treatment, y=evergr.lai, fill = site))+
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
-  ggtitle("evergr lai.wt")
-
-ggdensity(lai.wt, x = "evergr.lai",
-            add = "mean", rug = T, color = "site")
-```
-
-``` {r forb SLA,  echo=T, include=T, results='show'}
-lai.wt %>% 
-  ggplot(aes(x=treatment, y=forb.lai, fill = site))+
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -0.1, method = "anova") +
-  ggtitle("forb lai.wt")
-
-ggdensity(lai.wt, x = "forb.lai",
-            add = "mean", rug = T, color = "site")
-
-```
-
-```{r ANOVA and Kruskal-Wallis Test, echo=T, include=T}
-
-pft %>% filter() %>%
-  aov(total.anpp ~ Error(block) + site*treatment, data = .) %>% 
-  summary()
-
-pft %>% filter() %>%
-  aov(total.biomass ~ Error(block) + site*treatment, data = .) %>% 
-  summary()
-
-# Does severe C biomass = unbured C biomass?
-pft %>% filter(treatment=="C") %>% 
-  kruskal.test(total.biomass ~ site, data = .)
-
-# Is anpp the same for all severe treatments?
-pft %>% filter(site=="S") %>% 
-  kruskal.test(total.anpp ~ treatment, data = .)
-
-treat_aov <- function(data_frame, measurement){
-  mF <- formula(paste(measurement, " ~ as.factor(block) + site * treatment")) 
-  m <- aov(mF, data = data_frame)
-  print(summary(m))
-  #return(TukeyHSD(m))
-}
-treat_aov(pft, "total.anpp")
-
-model <- lm(total.anpp ~ site/as.factor(block)+treatment+site:treatment, data=pft)
-summary(model)
-
-pft %>%  select(site:treatment, total.biomass)
-
-```
-
-#### Biomass Graphs
-```{r productivity percents & correlations}
-
-pft %>% 
-  gather(sedge.anpp:forb.anpp, key="pft", value = "anpp") %>% 
-  ggplot(aes(fill=pft, y=anpp, x=treatment)) +
-  geom_bar(position = "fill",stat = "identity", width = 0.5) +
-  facet_grid(.~site) + 
-  ggtitle("percent total productivity") +
-  scale_fill_brewer(palette="Spectral")
-
-pft %>% 
-  gather(sedge.biomass:forb.biomass, key="pft", value = "biomass") %>% 
-  ggplot(aes(fill=pft, y=biomass, x=treatment))+
-  geom_bar(position = "fill",stat = "identity", width = 0.5)+
-  facet_grid(.~site) + 
-  ggtitle("percent total biomass") +
-  scale_fill_brewer(palette="Spectral")
-```
-
-```{r productivity bar graphs with error bars}
-my_comparisons <- list( c("C", "N"), c("C", "NP"), c("C", "P"))
-
-pft %>% 
-  ggplot(aes(x = treatment, y = total.anpp, fill=site)) +
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
-  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.format", label.y = -10, method = "anova") +
-  ggtitle("total productivity -- g/m2")
-
-pft %>% 
-  filter(site=="U") %>% 
-  ggbarplot(x = "treatment" ,y = "total.anpp", add = c("mean_sd","jitter"),
-            ggtheme = theme_light(),
-            position = position_dodge(0.8), width = 0.5)+
-  stat_compare_means(aes(group = treatment), label = "p.format", method = "anova") + 
-  stat_compare_means(ref.group = "C", label = "p.format", label.y = -12, method = "t.test")+
-  ggtitle("unburned -- total productivity") +
-  ggrepel::geom_text_repel(aes(label = block))
-
-pft %>% 
-  filter(site=="S") %>% 
-  ggbarplot(x = "treatment" ,y = "total.anpp", add = c("mean_sd","jitter"),
-            ggtheme = theme_light(),
-            position = position_dodge(0.8), width = 0.5)+
-  stat_compare_means(aes(group = treatment), label = "p.format", method = "anova") + 
-  stat_compare_means(ref.group = "C", label = "p.format", label.y = -12, method = "t.test") +
-  ggtitle("severe -- total productivity") +
-  ggrepel::geom_text_repel(aes(label = block))
-
-pft %>% 
-  filter(site=="S", block == 2, treatment == "NP")
-```
-
-```{r control productivity}
-pft %>% 
-  filter(treatment=="C") %>% 
-  ggbarplot(x = "site" ,y = "total.anpp", add = c("mean_sd","jitter"),
-             width = 0.5) + 
-  stat_compare_means(ref.group = "S", label = "p.format", label.y = 15, method = "t.test")+
-  ggtitle("total C productivity")
-```
-
-```{r decid anpp}
-pft %>% 
-  ggplot(aes(x = treatment, y = decid.anpp, fill = site)) +
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
-  stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
-  ggtitle("decid productivity -- g/m2")
-```
-
-```{r sedge anpp}
-pft %>% 
-  ggplot(aes(x = treatment, y = sedge.anpp, fill = site)) +
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
-  stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
-  ggtitle("sedge productivity -- g/m2")
-```
-
-```{r evergr anpp}
-pft %>% 
-  ggplot(aes(x = treatment, y = evergr.anpp, fill = site)) +
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
-  stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
-  ggtitle("evergr productivity -- g/m2")
-```
-
-```{r forb anpp}
-pft %>% 
-  ggplot(aes(x = treatment, y = forb.anpp, fill = site)) +
-  facet_grid(cols = vars(site)) +
-  stat_summary(fun.y = mean, geom = "bar",position = position_dodge(),width=0.5) + 
-  stat_summary(fun.data = mean_sd, geom = "errorbar",position = position_dodge(0.5), width=0.15)+
-  stat_compare_means(aes(group = treatment), label = "p.signif", label.y = -5)+
-  ggtitle("forb productivity -- g/m2")
-```
-
-### **reflectance**
-***
-```{r reflectance, eval=FALSE, include=FALSE, results='hide'}
+library(ggbiplot)
+library(lme4)
+library(nlme)
+library(MASS)
+library(lsmeans)
 library(data.table)
+select <- dplyr::select
+summarise <- dplyr::summarise
+
+```
+
+```{r reflectance, echo=T, eval=T, include=T, results='show'}
 
 spec <- fread("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
 spec <- as_tibble(spec)
 
-spec <- spec %>% 
-  filter(year==2018) %>%
-  gather('350':'2500',key = "wavelength" ,value = "reflectance")
+vi <- spec %>%   
+  mutate(blue = rowMeans(spec[,116:136]),     # blue = 459nm-479nm
+         green = rowMeans(spec[,202:222]),    # green = 545nm-565nm
+         red = rowMeans(spec[,277:327]),      # red = 620nm-670nm
+         nir = rowMeans(spec[,498:533]),      # nir = 841nm-876nm
+         swir1 = rowMeans(spec[,887:907]),    # swir1 = 1230nm-1250nm
+         swir2 = rowMeans(spec[,1285:1309]),  # swir2 = 1628nm-1652nm
+         swir3 = rowMeans(spec[,1762:1812]),  # swir3 = 2105nm-2155nm
+         p510 = rowMeans(spec[,167]),
+         p550 = rowMeans(spec[,207]),
+         p700 = rowMeans(spec[,357]),
+         p1510 = rowMeans(spec[,1167]),
+         p1680 = rowMeans(spec[,1337]),
+         ndvi = (nir - red)/(nir + red),
+         evi = 2.5 * ((nir - red)/(nir + 6*red - 7.5*blue + 1)),
+         evi2 = 2.5 * ((nir - red)/(nir + 2.4*red + 1)),
+         gci = (nir/green) - 1,
+         gli = ((green - red) + (green - blue))/((2*green) + red + blue),
+         ari = (1/p550)-(1/p700),
+         cri = (1/p510)-(1/p550),
+         ndni = (log(1/p1510) - log(1/p1680)) / (log(1/p1510) + log(1/p1680)),
+         s.lai = 3.618*evi - 0.118) %>% select(site:file_name,blue:s.lai)
 
-spec$wavelength <- as.numeric(spec$wavelength)
-spec$site <- as.factor(spec$site)
+cols <- c("site", "block", "treatment", "year")
+vi[cols] <- lapply(vi[cols], factor)
 
-spec$reflectance[spec$wavelength>1325 & spec$wavelength<1500] <- NA
-spec$reflectance[spec$wavelength>1775 & spec$wavelength<2050] <- NA
-spec$reflectance[spec$wavelength>2350] <- NA
+vi <- vi %>% dplyr::group_by(year, site, treatment, block) %>%
+  summarise(blue = mean(blue),
+                   green = mean(green),
+                   red = mean(red),
+                   nir = mean(nir),
+                   swir1 = mean(swir1),
+                   swir2 = mean(swir2),
+                   swir3 = mean(swir3),
+                   p510 = mean(p510),
+                   p550 = mean(p550),
+                   p700 = mean(p700),
+                   p1510 = mean(p1510),
+                   p1680 = mean(p1680),
+                   ndvi = mean(ndvi),
+                   evi = mean(evi),
+                   evi2 = mean(evi2),
+                   gci = mean(gci),
+                   gli = mean(gli),
+                   ari = mean(ari),
+                   cri = mean(cri),
+                   ndni = mean(ndni),
+                   s.lai = mean(s.lai))
 
-head(spec)
-  
-  
-red <- spec[spec$wavelength>=620 & spec$wavelength<=670, ]
-red <- aggregate(reflectance ~ site * block * treatment * file_name, red, mean)
-
-green <- spec[spec$wavelength>=545 & spec$wavelength<=565, ]
-
-blue <- spec[spec$wavelength>=459 & spec$wavelength<=479, ]
-
-nir <- spec[spec$wavelength>=841 & spec$wavelength<=876, ]
-nir <- aggregate(reflectance ~ site * block * treatment * file_name, nir, mean)
-
-swir1 <- spec[spec$wavelength>=1230 & spec$wavelength<=1250, ]
-
-swir2 <- spec[spec$wavelength>=1628 & spec$wavelength<=1652, ]
-
-swir3 <- spec[spec$wavelength>=2105 & spec$wavelength<=2155, ]
+rm(spec, cols)
 ```
 
-```{r spectral indicies, eval=FALSE, include=FALSE, results=F}
-ndvi <- (nir$reflectance-red$reflectance)/(nir$reflectance+red$reflectance)
+```{r reflectance models, echo=T, eval=F, include=T, results='show'}
+boxplot(evi2 ~ block * year,
+        col= c("white","lightgray"), vi)
 
-ggplot(ndvi) +
-  geom_histogram()
+boxplot(evi2 ~ site * treatment,
+        col= c("white","lightgrey"), vi)
+
+ndvi.model <- lme4::lmer(ndvi ~ site * treatment + (1 + site|block) + (1 + site|year), data = vi, REML = F)
+summary(ndvi.model)
+
+ndvi.model.2 <- lme(ndvi ~ site * treatment, random =~ 1 |block/site/year, data = vi)
+anova(ndvi.model.2)
+lsmeans(ndvi.model.2, pairwise~site*treatment, adjust=c("tukey"))
+
+coef(ndvi.model.2)
+coef(ndvi.model)
+
+plot(ndvi.model)
+qqnorm(vi$ndvi, pch = 1, frame = FALSE); qqline(vi$ndvi, col = "steelblue", lwd = 2)
+
+anova(ndvi.model)
+summary(ndvi.model)
+
+
+post <- arm::sim(ndvi.model, 1000)@fixef
+unbN <- (post[,1] + post[,4] + post[,7]) - (post[,1] + post[,2])
+hist(unbN)
+
+1-(sum(ifelse(unbN > 0, 1, 0))/1000)
+```
+
+```{r point_frame, echo=F, eval=T, include=F, results='hide'}
+
+data_dir <- ("/Users/ianklupar/Desktop/thesis-data/v2/organized/point_frame/2019/")
+
+pf_19 <- data_dir %>% 
+  dir_ls(regexp = "*.csv") %>% 
+  map_dfr(read_csv, .id = "id", col_types = cols()) %>% 
+  mutate(id = substr(id, 68, 78)) %>% 
+  separate(id, c("plot_id"),  sep = "\\.") %>% 
+  separate(plot_id, c("site", "block", "treatment"), sep = "\\-") %>% 
+  select(site:treatment, CALL:`9.5`)%>%
+  replace(is.na(.), 0)
+
+spp <- c("CALCAN","ANDPOL","BETNAN","CASTET","CARBIG","ERIVAG","LEDPAL","PETFRI","RUBCHA","SALPUL","VACVIT","PEDLAP","VACULI","EPIANG","PEDLAP","VACULI","VACOXY","SPIREA", "LICHEN","MOSS")
+
+pf_19 <- pf_19[pf_19$CALL %in% spp,]  %>%
+  mutate(year = 2019,
+         hits = rowSums(.[5:length(.)])) %>% 
+  select(site, block, treatment, year, CALL, hits) %>% 
+  spread(key = "CALL", value = "hits") %>% 
+  replace(is.na(.), 0)
+
+colnames(pf_19) <- tolower(colnames(pf_19))
+
+cols <- c("site", "block", "treatment", "year")
+pf_19[cols] <- lapply(pf_19[cols], factor)
+
+pf_16_18 <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/point_frame/burn_fertilization_point_frame.csv")
+pf_16_18[cols] <- lapply(pf_16_18[cols], factor)
+
+pf <- full_join(pf_16_18,pf_19) %>% 
+  replace(is.na(.), 0) %>% 
+  mutate(total = rowSums(.[5:length(.)]),
+         sedge = (carbig + calcan + erivag)/total,
+         decid = (spirea + betnan + salpul + vaculi)/total,
+         evergr = (andpol + castet + empnig + ledpal + vacvit + vacoxy)/total,
+         forb = (petfri + rubcha + pedlap)/total) %>% 
+  select(site:year, sedge:forb) %>% 
+  .[order(.$year, .$site, .$treatment, .$block),]
+
+pf[cols] <- lapply(pf[cols], factor)
+
+rm(cols, spp, data_dir, pf_19, pf_16_18)
+```
+
+```{r point_frame models, echo=T, eval=F, include=T, results='show'}
+
+boxplot(decid ~ block * year,
+        col= c("white","lightgray"), pf)
+
+decid.null <- lmer(decid ~ 1 + (1 + site|block) + (1 + site|year), data = pf, REML = F)
+decid.model <- lmer(decid ~ site * treatment + (1 + site|block) + (1 + site|year), data = pf, REML = F)
+
+coef(decid.model)
+
+plot(decid.model)
+qqnorm(pf$decid, pch = 1, frame = FALSE); qqline(pf$decid, col = "steelblue", lwd = 2)
+
+anova(decid.null, decid.model)
+summary(decid.model)
+```
+
+```{r lai, echo=T, eval=T, include=T, results='show'}
+
+lai <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/leaf_area/burn_fertilization_LAI.csv", col_types = cols())
+
+lai <- lai %>% dplyr::group_by(year, site, treatment, block) %>% 
+  dplyr::summarize(lai = mean(LAI))
+
+cols <- c("site", "block", "treatment", "year")
+lai[cols] <- lapply(lai[cols], factor)
+
+# lai %>% filter((year==2018|year==2019) & treatment=="C") %>% spread(year, lai ) %>% 
+#   mutate(new = (`2019`*2.5) - 0.57) %>% 
+#   ggplot(aes(x = `2018`, y = `new`)) +
+#   geom_point() + 
+#   geom_smooth(method = "lm", se=F) 
+
+lai <- lai %>% spread(year, lai) %>% mutate(`2019` = (`2019` * 2.5) - 0.57) %>%
+  gather(`2016`,`2017`,`2018`,`2019`, key = "year",  value = "lai") 
+
+rm(cols)
+```
+
+```{r lai models, echo=T, eval=F, include=T, results='show'}
+lai %>% 
+  spread(treatment, lai) %>% 
+  mutate(N = N/C,
+         NP = NP/C,
+         P = P/C) %>% 
+  select(year:block, N:P) %>% 
+  gather(N, NP, P, key = "treatment", value = "ratio") %>% 
+  ggplot(aes(x = treatment, y = ratio, fill = site)) +
+  facet_grid(.~year) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(), width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(0.5), width=0.15)
+
+lai %>% filter(year==2019) %>% 
+  ggplot(aes(x = treatment, y = lai, fill = site)) + 
+  stat_summary(fun.y = mean, geom = "bar", width=0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width=0.15) +
+  facet_grid(.~site) 
+
+boxplot(lai ~ site* block * year,
+        col= c("white","lightgray"), lai)
+
+lai.18_19 <- lai %>% filter(year==2018|year==2019)
+lai.model.2 <- lme(lai ~ site * treatment, random =~ 1 |block/site/year, data = lai.18_19)
+anova(lai.model.2)
+lsmeans(lai.model.2, pairwise~site*treatment, adjust=c("tukey"))
+
+lai.null <- lmer(lai ~ 1 + (1 + site|block) + (1 + site|year), data = lai, REML = F)
+lai.model <- lmer(lai ~ site * treatment + (1 + site|block) + (1 + site|year), data = lai, REML = F)
+
+coef(lai.model)
+
+plot(lai.model)
+qqnorm(lai$lai, pch = 1, frame = FALSE); qqline(lai$lai, col = "steelblue", lwd = 2)
+
+anova(lai.null, lai.model)
+summary(lai.model)
+
+```
+
+```{r combined data}
+df <- left_join(lai, pf, by = c("site", "block", "treatment", "year")) %>% 
+  left_join(., vi, by = c("site", "block", "treatment", "year"))
+```
+
+```{r PCA distance forloop 2019}
+# explanation of code: first i calculated the euclidean distance in PCA space between each control and each plot. ex: C0 to all treatments block 0-4. There were 25 comparisons between all controls and each individual treatment, so 75 comparisons at each of 2 sites for 150 total. Next, I calculated the physical distance between each control and all other plots in the same manner as before. Each plot is 6m apart in the x direction and 10m apart in the y direction. 
+
+library(factoextra)
+library(FactoMineR)
+
+data <- df %>% filter(year==2019)
+
+data.pca <- prcomp(data[,-c(1:4)], scale = T)
+
+distance <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) 
+
+output <- data_frame(site = rep(0,50), control = rep(0,50), treatment = rep(0,50),N_pca = rep(0,50), NP_pca = rep(0,50), P_pca = rep(0,50))
+for(ii in 0:4){
+ for(i in 1:5){
+   # severe [output + 0, ii + 1, i + 0]
+   output[i+(ii*5), "N_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_N[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_N[[i]])^2)
+   output[i+(ii*5), "NP_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_NP[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_NP[[i]])^2)
+   output[i+(ii*5), "P_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_P[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_P[[i]])^2)
+   output[i+(ii*5) ,"site"] <- paste0(distance$site[ii+1])
+   output[i+(ii*5) ,"control"] <- paste0(distance$block[ii+1])
+   output[i+(ii*5) ,"treatment"] <- paste0(distance$block[i])
+   
+   # unburned [ourput + 25, ii + 6, i + 5]
+   output[i+(ii*5)+25, "N_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_N[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_N[[i+5]])^2)
+   output[i+(ii*5)+25, "NP_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_NP[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_NP[[i+5]])^2)
+   output[i+(ii*5)+25, "P_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_P[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_P[[i+5]])^2)
+   output[i+(ii*5)+25 ,"site"] <- paste0(distance$site[ii+6])
+   output[i+(ii*5)+25 ,"control"] <- paste0(distance$block[ii+6])
+   output[i+(ii*5)+25 ,"treatment"] <- paste0(distance$block[i+5])
+  } 
+}
+pca_dist <- output %>% unite(comparison, control, treatment)
+
+plots <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/plot_locations.csv", col_types = cols())
+cols <- c("site", "block", "treatment")
+plots[cols] <- lapply(plots[cols], factor)
+
+plots <- plots %>% 
+  gather(variable, value, -(site:treatment)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value)
+ii <- 0 
+i <- 1
+
+output <- data_frame(site = rep(0,50), control = rep(0,50), treatment = rep(0,50),N_plot = rep(0,50), NP_plot = rep(0,50), P_plot = rep(0,50))
+for(ii in 0:4){
+ for(i in 1:5){
+   output[i+(ii*5), "N_plot"] <- sqrt((plots$x_C[[ii+1]] - plots$x_N[[i]])^2 + (plots$y_C[[ii+1]] - plots$y_N[[i]])^2)
+   output[i+(ii*5), "NP_plot"] <- sqrt((plots$x_C[[ii+1]] - plots$x_NP[[i]])^2 + (plots$y_C[[ii+1]] - plots$y_NP[[i]])^2)
+   output[i+(ii*5), "P_plot"] <- sqrt((plots$x_C[[ii+1]] - plots$x_P[[i]])^2 + (plots$y_C[[ii+1]] - plots$y_P[[i]])^2)
+   output[i+(ii*5) ,"site"] <- paste0(plots$site[ii+1])
+   output[i+(ii*5) ,"control"] <- paste0(plots$block[ii+1])
+   output[i+(ii*5) ,"treatment"] <- paste0(plots$block[i]) 
+   
+   output[i+(ii*5)+25, "N_plot"] <- sqrt((plots$x_C[[ii+6]] - plots$x_N[[i+5]])^2 + (plots$y_C[[ii+6]] - plots$y_N[[i+5]])^2)
+   output[i+(ii*5)+25, "NP_plot"] <- sqrt((plots$x_C[[ii+6]] - plots$x_NP[[i+5]])^2 + (plots$y_C[[ii+6]] - plots$y_NP[[i+5]])^2)
+   output[i+(ii*5)+25, "P_plot"] <- sqrt((plots$x_C[[ii+6]] - plots$x_P[[i+5]])^2 + (plots$y_C[[ii+6]] - plots$y_P[[i+5]])^2)
+   output[i+(ii*5)+25 ,"site"] <- paste0(plots$site[ii+6])
+   output[i+(ii*5)+25 ,"control"] <- paste0(plots$block[ii+6])
+   output[i+(ii*5)+25 ,"treatment"] <- paste0(plots$block[i+5])  
+ }
+  }
+plot_dist <- output %>% unite(comparison, control, treatment)
+
+distance_cor
+full_join(pca_dist, plot_dist) %>% 
+  gather(variable, distance, -(site:comparison)) %>%
+  separate(variable, into = c("treatment","type")) %>%
+  spread(type, distance) %>% 
+  mutate(plot = 1/(plot^2))
+```
+
+```{r PCA distance controls 2019}
+distance <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value)  %>%
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+        NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+        P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2))%>%
+   select(site:year,N:P) %>%
+   gather(key = "treatment", value = "euclid",  N:P) %>%
+   select(site, year, treatment, euclid)
+
+distanceC <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>%  filter(treatment=="C") %>% 
+  unite(temp, variable, block) %>% 
+  spread(temp, value) %>%  
+  mutate("0_1" = sqrt((PC1_0 - PC1_1)^2 + (PC2_0 - PC2_1)^2),
+         "0_2" = sqrt((PC1_0 - PC1_2)^2 + (PC2_0 - PC2_2)^2),
+         "0_3" = sqrt((PC1_0 - PC1_3)^2 + (PC2_0 - PC2_3)^2),
+         "0_4" = sqrt((PC1_0 - PC1_4)^2 + (PC2_0 - PC2_4)^2),
+         "1_2" = sqrt((PC1_1 - PC1_2)^2 + (PC2_1 - PC2_2)^2),
+         "1_3" = sqrt((PC1_1 - PC1_3)^2 + (PC2_1 - PC2_3)^2),
+         "1_4" = sqrt((PC1_1 - PC1_4)^2 + (PC2_1 - PC2_4)^2),
+         "2_3" = sqrt((PC1_2 - PC1_3)^2 + (PC2_2 - PC2_3)^2),
+         "2_4" = sqrt((PC1_2 - PC1_4)^2 + (PC2_2 - PC2_4)^2),
+         "3_4" = sqrt((PC1_3 - PC1_4)^2 + (PC2_3 - PC2_4)^2)) %>% 
+  select(site:year, "0_1":"3_4") %>% 
+  gather(block, euclid, -(site:year)) %>% 
+  select(site, year, treatment, euclid)
+
+distance <- full_join(distance, distanceC)
+
+distance %>% 
+  ggplot(aes(x = treatment, y = euclid, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar", width=0.4, position = position_dodge(0.5)) + 
+  stat_summary(fun.data = mean_ci, geom = "errorbar", width=0.05, position = position_dodge(0.5)) +
+  facet_grid(.~site) +
+  ggtitle("PCA Euclid. Distance - 2019 (no distance factor)")
+
+ggsave(filename = "PCA_euclid_2019.tiff" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs", width = 5, height = 5, units = 'in', dpi = 300)
+
+```
+
+```{r PCA graphs}
+pca.means <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment) %>% 
+  summarise(PC1 = mean(PC1),
+            PC2 = mean(PC2))
+
+pca.points <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment)
+
+pca.points %>% 
+  ggplot(aes(x = PC1, y = PC2, color = site, shape = treatment)) +
+  geom_point() +
+  geom_point(data = pca.means, aes(x = PC1, y = PC2, color = site, size = 2)) +
+  geom_hline(yintercept=0, linetype = "dashed", color = "darkgrey") + 
+  geom_vline(xintercept=0, linetype = "dashed", color = "darkgrey") +
+  geom_segment(aes(x=0.4782495, y=-2.2192440, xend=2.5514905, yend=-0.1049057), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=0.4782495, y=-2.2192440, xend=5.0553075, yend=2.3454581), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=0.4782495, y=-2.2192440, xend=1.0230492, yend=-0.9382823), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=-2.5739559, y=0.2556784, xend=-4.0706340, yend=-1.0944130), size = 0.25, color = "black") +
+  geom_segment(aes(x=-2.5739559, y=0.2556784, xend=0.6746357, yend=2.6733123), size = 0.25, color = "black") +
+  geom_segment(aes(x=-2.5739559, y=0.2556784, xend=-3.1381426, yend=-0.9176038), size = 0.25, color = "black") +
+  ggtitle("PCA - 2019")
+ggsave(filename = "PCA_2019.tiff" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs", width = 5, height = 5, units = 'in', dpi = 300)
+```
+
+```{r PCA graphs 2018}
+data <- df %>% filter(year==2018)
+
+data.pca <-  prcomp(data[,-c(1:4)], scale = T)
+
+loadings <- as_tibble(data.pca$x[,1:3]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(variable, value, -(site:year)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) %>% 
+  mutate(N = sqrt((PC1_C - PC1_N)^2 + (PC2_C - PC2_N)^2),
+         NP = sqrt((PC1_C - PC1_NP)^2 + (PC2_C - PC2_NP)^2),
+         P = sqrt((PC1_C - PC1_P)^2 + (PC2_C - PC2_P)^2),
+         degreeN = atan((PC1_N - PC1_C)/(PC2_N - PC2_C))*(180/pi),
+         degreeNP = atan((PC1_NP - PC1_C)/(PC2_NP - PC2_C))*(180/pi),
+         degreeP = atan((PC1_P - PC1_C)/(PC2_P - PC2_C))*(180/pi))
+
+loadings %>% 
+  select(site:year,N:P) %>% 
+  gather(key = "treatment", value = "euclid",  N:P) %>% 
+  ggplot(aes(x = treatment, y = euclid, fill = site)) +
+  stat_summary(fun.y = mean, geom = "bar", width=0.4, position = position_dodge(0.5)) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width=0.05, position = position_dodge(0.5)) +
+  ggtitle("PCA Euclid. Distance - 2018")
+ggsave(filename="PCA_euclid_2018.tiff" ,path="/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs", width = 5, height = 5, units = 'in', dpi = 300)
+
+pca.means <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment) %>% 
+  summarise(PC1 = mean(PC1),
+            PC2 = mean(PC2))
+
+pca.points <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment)
+
+pca.points %>% 
+  ggplot(aes(x = PC1, y = PC2, color = site, shape = treatment)) +
+  geom_point() +
+  geom_point(data = pca.means, aes(x = PC1, y = PC2, color = site, size = 2)) +
+  geom_hline(yintercept=0, linetype = "dashed", color = "darkgrey") + 
+  geom_vline(xintercept=0, linetype = "dashed", color = "darkgrey") +
+  geom_segment(aes(x=-0.2742408, y=0.9682815, xend=2.3434543, yend=-0.4932892), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=-0.2742408, y=0.9682815, xend=3.3684914, yend=-4.2309661), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=-0.2742408, y=0.9682815, xend=-1.5891412, yend=-1.6131669), size = 0.25, color = "black", linetype = "dotted") +
+  geom_segment(aes(x=-0.4041663, y=2.8422132, xend=-3.0609560, yend=1.0591751), size = 0.25, color = "black") +
+  geom_segment(aes(x=-0.4041663, y=2.8422132, xend=1.8193332, yend=-0.8909248), size = 0.25, color = "black") +
+  geom_segment(aes(x=-0.4041663, y=2.8422132, xend=-2.2027747, yend=2.3586771), size = 0.25, color = "black") +
+  ggtitle("PCA - 2018")
+ggsave(filename = "PCA_2018.tiff" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs", width = 5, height = 5, units = 'in', dpi = 300)
+
+```
+
+
+```{r lai percent cover relationship}
+
+df %>% 
+  select(year:block, lai:forb, ndvi, evi2) %>% gather(sedge:forb, key = "pft", value = "cover") %>% 
+  ggplot(aes(x = lai, y = cover)) +
+  facet_grid(.~pft) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  stat_cor() + 
+  ggtitle("")
+
+df %>% 
+  select(year:block, lai:forb, ndvi, evi2) %>% filter(year==2018 | year==2019) %>% gather(sedge:forb, key = "pft", value = "cover") %>% 
+  ggplot(aes(x = evi2, y = cover)) +
+  facet_grid(.~pft) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  stat_cor() + 
+  ggtitle("")
 
 
 ```
+
+
+
+
+
 
 
 
