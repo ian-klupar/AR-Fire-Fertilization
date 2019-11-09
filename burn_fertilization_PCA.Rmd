@@ -1,0 +1,613 @@
+---
+title: "burn_fertilization_PCA"
+author: "Ian Klupar"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=F, include=F, eval=T, results='hide'}
+knitr::opts_chunk$set(echo = F)
+
+# clear all
+rm(list=ls())
+if(!is.null(dev.list())) dev.off()
+cat("\014")
+
+library(tidyverse)
+library(fs)
+library(modelr)
+library(ggpubr)
+library(broom)
+library(ggbiplot)
+library(lme4)
+library(nlme)
+library(MASS)
+library(lsmeans)
+library(data.table)
+
+# make sure these functions are dplyr and not plyr
+select <- dplyr::select
+summarise <- dplyr::summarise
+
+# palette for poor color blind people
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+```{r, read in files}
+cols <- c("site", "block", "treatment", "year")
+
+# read in 2018 and 2019 spectral data
+spec <- fread("/Users/ianklupar/Desktop/thesis-data/v2/organized/reflectance/burn_fertilization_reflectance.csv")
+spec <- as_tibble(spec)
+
+vi <- spec %>%   
+  mutate(blue = rowMeans(spec[,116:136]),     # blue = 459nm-479nm
+         green = rowMeans(spec[,202:222]),    # green = 545nm-565nm
+         red = rowMeans(spec[,277:327]),      # red = 620nm-670nm
+         nir = rowMeans(spec[,498:533]),      # nir = 841nm-876nm
+         swir1 = rowMeans(spec[,887:907]),    # swir1 = 1230nm-1250nm
+         swir2 = rowMeans(spec[,1285:1309]),  # swir2 = 1628nm-1652nm
+         swir3 = rowMeans(spec[,1762:1812]),  # swir3 = 2105nm-2155nm
+         p510 = rowMeans(spec[,167]),
+         p550 = rowMeans(spec[,207]),
+         p700 = rowMeans(spec[,357]),
+         p1510 = rowMeans(spec[,1167]),
+         p1680 = rowMeans(spec[,1337]),
+         ndvi = (nir - red)/(nir + red),
+         sr = nir/red,
+         arvi = ((nir)-(2*red - blue)/(nir) + (2*red - blue)),
+         
+         evi = 2.5 * ((nir - red)/(nir + 6*red - 7.5*blue + 1)),
+         evi2 = 2.5 * ((nir - red)/(nir + 2.4*red + 1)),
+         gci = (nir/green) - 1,
+         gli = ((green - red) + (green - blue))/((2*green) + red + blue),
+         ari = (1/p550)-(1/p700),
+         cri = (1/p510)-(1/p550),
+         ndni = (log(1/p1510) - log(1/p1680)) / (log(1/p1510) + log(1/p1680)),
+         s.lai = 3.618*evi - 0.118) %>% select(site:file_name,blue:s.lai)
+vi[cols] <- lapply(vi[cols], factor)
+
+vi <- vi %>% dplyr::group_by(year, site, treatment, block) %>%
+  summarise(blue = mean(blue), green = mean(green), red = mean(red), nir = mean(nir),
+            swir1 = mean(swir1), swir2 = mean(swir2), swir3 = mean(swir3), p510 = mean(p510),
+            p550 = mean(p550), p700 = mean(p700), p1510 = mean(p1510), p1680 = mean(p1680),
+            ndvi = mean(ndvi), evi = mean(evi), evi2 = mean(evi2), gci = mean(gci),
+            gli = mean(gli), ari = mean(ari), cri = mean(cri), ndni = mean(ndni),
+            s.lai = mean(s.lai)) %>% 
+  select(year:block,ndvi:gli)
+
+# read in lai data
+lai <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/leaf_area/burn_fertilization_LAI.csv", col_types = cols())
+
+lai <- lai %>% dplyr::group_by(year, site, treatment, block) %>% 
+  dplyr::summarize(lai = mean(LAI))
+
+cols <- c("site", "block", "treatment", "year")
+lai[cols] <- lapply(lai[cols], factor)
+lai <- lai %>% spread(year, lai) %>% mutate(`2019` = (`2019` * 2.5) - 0.57) %>%
+  gather(`2016`,`2017`,`2018`,`2019`, key = "year",  value = "lai") 
+
+# read in 2019 point frame data and organize
+data_dir <- ("/Users/ianklupar/Desktop/thesis-data/v2/organized/point_frame/2019/")
+
+pf_19 <- data_dir %>% 
+  dir_ls(regexp = "*.csv") %>% 
+  map_dfr(read_csv, .id = "id", col_types = cols()) %>% 
+  mutate(id = substr(id, 68, 78)) %>% 
+  separate(id, c("plot_id"),  sep = "\\.") %>% 
+  separate(plot_id, c("site", "block", "treatment"), sep = "\\-") %>% 
+  select(site:treatment, CALL:`9.5`)%>%
+  replace(is.na(.), 0)
+
+spp <- c("CALCAN","ANDPOL","BETNAN","CASTET","CARBIG","ERIVAG","LEDPAL","PETFRI","RUBCHA","SALPUL","VACVIT","PEDLAP","VACULI","EPIANG","PEDLAP","VACULI","VACOXY","SPIREA")
+
+pf_19 <- pf_19[pf_19$CALL %in% spp,]  %>%
+  mutate(year = 2019,
+         hits = rowSums(.[5:length(.)])) %>% 
+  select(site, block, treatment, year, CALL, hits) %>% 
+  spread(key = "CALL", value = "hits") %>% 
+  replace(is.na(.), 0)
+
+colnames(pf_19) <- tolower(colnames(pf_19))
+pf_19[cols] <- lapply(pf_19[cols], factor)
+
+# read in 2016-2018 point frame data and organize
+pf_16_18 <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/point_frame/burn_fertilization_point_frame.csv")
+pf_16_18[cols] <- lapply(pf_16_18[cols], factor)
+
+pf_spp <- full_join(pf_16_18,pf_19) %>% 
+  replace(is.na(.), 0)
+
+# join together 2016 - 2019 point frame data
+pf <- full_join(pf_16_18,pf_19) %>% 
+  replace(is.na(.), 0) %>% 
+  mutate(total = carbig + calcan + erivag + spirea + betnan + salpul +
+                 vaculi+andpol + castet + empnig + ledpal + vacvit + vacoxy +
+                 petfri + rubcha + pedlap + epiang,
+         sedge = (carbig + calcan + erivag),
+         decid = (spirea + betnan + salpul + vaculi),
+         evergr = (andpol + castet + empnig + ledpal + vacvit + vacoxy),
+         forb = (petfri + rubcha + pedlap + epiang)) %>%
+  mutate_if(is.double, funs("cover"=./total)) %>% select(site:year, ends_with("cover")) %>% 
+  arrange(site, treatment, block)
+
+# remove "_cover" from the end of each column name
+pf <- pf %>% 
+  gather(-(site:year), key = "spp", value = "cover") %>% 
+  separate(spp, c("spp","delete")) %>% 
+  select(-delete) %>% 
+  spread(spp, cover)
+
+pf[cols] <- lapply(pf[cols], factor)
+
+df <- left_join(lai, pf, by = c("site", "block", "treatment", "year")) %>% 
+  left_join(., vi, by = c("site", "block", "treatment", "year")) %>% 
+  arrange(site, year, treatment, block)
+
+df <- df %>%
+  mutate(ndvi = ifelse(year == 2016 | year == 2017, 0.63 + 0.033 * lai, ndvi),
+         evi = ifelse(year == 2016 | year == 2017, 0.44 + 0.056 * lai, evi),
+         evi2 = ifelse(year == 2016 | year == 2017, 0.44 + 0.054 * lai, evi2),
+         gci = ifelse(year == 2016 | year == 2017, 3.4 + 0.38 * lai, gci),
+         gli = ifelse(year == 2016 | year == 2017, 0.13 + 0.038 * lai, gli))
+df <- df %>% mutate(year = factor(year))
+
+
+rm(spec, lai, vi, cols, pf, data_dir, pf_16_18, pf_19, pf_spp, spp)
+```
+
+```{r different PCAs}
+library(factoextra)
+library(FactoMineR)
+# first i calculated the euclidean distance in PCA space between each control and each plot. ex: C0 to all treatments block 0-4. There were 25 comparisons between all controls and each individual treatment, so 75 comparisons at each of 2 sites for 150 total. Next, I calculated the physical distance between each control and all other plots in the same manner as before. The center of each plot in the grid is 6m apart in the x direction and 10m apart in the y direction. 
+
+# subsets for PCAs
+func_types <- c("decid", "evergr","forb","sedge")
+species <- c("carbig", "calcan", "erivag", "spirea", "betnan", 
+             "salpul", "vaculi", "andpol", "castet", "empnig",
+             "ledpal", "vacvit", "vacoxy", "petfri", "rubcha" ,
+             "pedlap", "epiang")
+veg_index <- c("ndvi", "evi", "evi2", "gci", "gli")
+leaf_area <- c("lai")
+key <- c("site","block","treatment","year")
+
+# set which variables to run through pca
+data <- df[,c(func_types)]
+data <- data[complete.cases(data),]
+
+data.pca <- prcomp(data, scale = T)
+
+```
+
+```{r}
+# control
+a <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(df[,c("site", "block", "treatment", "year")],.) %>% 
+  gather(PC1:PC2, key = "PC", value = "coord") %>%
+  filter(treatment == "C") %>% 
+  unite(temp, PC, treatment) %>% 
+  spread(temp, coord) %>% 
+  ungroup() %>% 
+  select(site, year, block_C = block,PC1_C, PC2_C) %>% 
+  arrange(site, year, block_C) %>% 
+  slice(rep(1:n(), each = 5)) %>% # rep each line 5 times to compare to 0 to 0:4
+  slice(rep(1:n(), 3)) %>% # rep whole data frame 3 times for each of N, NP, and P
+  arrange(site, year) %>% 
+  rowid_to_column("index") 
+
+# treatment
+b <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(df[,c("site", "block", "treatment", "year")],.) %>% 
+  select(everything(), PC1_T = PC1, PC2_T = PC2, block_T = block) %>% 
+  filter(treatment != "C") %>% 
+  slice(rep(1:n(), 5)) %>%
+  arrange(site, year) %>% 
+  rowid_to_column("index") 
+
+# join a and b data frames to get the mean distance from treatment to control
+distance <- inner_join(a, b, by = c("index", "site", "year")) %>%
+  select(site, year, block_T, block_C, treatment, everything(), -index) %>%
+  arrange(site, year, block_C, block_T, treatment) %>% ungroup() %>% 
+  mutate(euclid = sqrt((PC1_C-PC1_T)^2 + (PC2_C - PC2_T)^2)) %>%  # euclidean distance from C
+  select(site, year, treatment, block_C, block_T, euclid)
+
+# distance each control plot is from the other controls
+#   break into 2 data frames so that comparisons can be made
+c1 <- as.tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(df[,c("site", "block", "treatment", "year")],.) %>% 
+  filter(treatment == "C") %>% 
+  slice(rep(1:n(), 5)) %>% 
+  arrange(site, year) %>%
+  rowid_to_column("index") 
+
+c2 <- as.tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(df[,c("site", "block", "treatment", "year")],.) %>% 
+  filter(treatment == "C") %>% 
+  slice(rep(1:n(), each = 5)) %>% 
+  arrange(site, year) %>%
+  rowid_to_column("index") 
+
+C_distance <- inner_join(c1, c2, by = c("index", "site", "treatment", "year")) %>% 
+  select(site, year, treatment, block.x, block.y, PC1.x, PC1.y, PC2.x, PC2.y) %>% 
+  mutate(euclid = sqrt((PC1.x-PC1.y)^2 + (PC2.x - PC2.y)^2)) %>% 
+  select(site:treatment, block_T = block.x, block_C = block.y, euclid)
+  
+distance <- full_join(distance, C_distance) %>% 
+  arrange(site, year, treatment) %>% 
+  unite(comparison, block_C, block_T)
+
+# physical distance between plots
+plots <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/plot_locations.csv", col_types = cols())
+
+plots <- plots %>% 
+  mutate(k = 1) %>%
+  filter(site=="S") %>%
+  select(-site) %>% 
+  unite(ID, block, treatment) 
+
+plots <- plots %>% 
+ full_join(plots, by = "k") %>% 
+ mutate(dist = sqrt((x.x - x.y)^2 + (y.x - y.y)^2)) %>%
+ select(ID.x, ID.y, dist, -k) %>% 
+ separate(ID.x, c("block_C","control")) %>% 
+  filter(control=="C") %>% 
+  separate(ID.y, c("block_T", "treatment")) %>% 
+  select(-control) %>% 
+  unite(comparison, block_C, block_T)
+
+# final data frame: treatment is the treatment under consideration, comparision is the blocks being compared control_treatment, euclid is the distance in PCA space, dist is the physical distance the plots are from each other.  (43.86342 - plot)/(43.86342-6)
+
+pca_distance <- full_join(distance, plots, by = c("comparison", "treatment")) %>% 
+  mutate(dist = (43.86342 - dist)/(43.86342-6),
+         euclid = euclid * dist) %>% 
+  mutate(euclid = ifelse(euclid == 0, NA, euclid)) %>% 
+  .[complete.cases(.), ] %>% 
+  separate(comparison, c("block_C", "block_T")) %>% 
+  group_by(site, year, treatment, block_T) %>% 
+  summarise(euclid = mean(euclid)) %>% 
+  select(site, block = block_T, treatment, year, euclid)
+  
+        
+rm(a, b, c1, c2, distance)
+```
+
+```{r PCA euclidean distance (with distance factor) 2016-2019}
+# create a data frame for easy row manipulation
+distance <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(df[,c("site", "block", "treatment", "year")],.) %>%
+  dplyr::group_by(site, block, treatment, year) %>% 
+  summarise(PC1 = mean(PC1), PC2 = mean(PC2)) %>% # took the mean of PC1 and PC2 values. (doesn't make a difference unless combining all years)
+  gather(variable, value, -(site:year)) %>% # gather variables to make unique column names for PC_Treatment
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) 
+
+output <- data_frame(site = rep(0,200), control = rep(0,200), treatment = rep(0,200), year= rep(0,200),
+                     N_pca = rep(0,200), NP_pca = rep(0,200), P_pca = rep(0,200))
+for(ii in 0:4){
+ for(i in 1:5){
+   # for loop that calculates euclidean distance between each control and every treatment plot. ex. C0 with N0-N5, C1 with N0-N5 etc.
+   # severe [output + 0, ii + 1, i + 0]
+   output[i+(ii*5), "N_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_N[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_N[[i]])^2)
+   output[i+(ii*5), "NP_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_NP[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_NP[[i]])^2)
+   output[i+(ii*5), "P_pca"] <- sqrt((distance$PC1_C[[ii+1]] - distance$PC1_P[[i]])^2 + (distance$PC2_C[[ii+1]] - distance$PC2_P[[i]])^2)
+   output[i+(ii*5), "site"] <- paste0(distance$site[ii+1])
+   output[i+(ii*5), "control"] <- paste0(distance$block[ii+1])
+   output[i+(ii*5), "treatment"] <- paste0(distance$block[i])
+   output[i+(ii*5), "year"] <- paste0(distance$year[i])
+   
+   # unburned [ourput + 25, ii + 6, i + 5]
+   output[i+(ii*5)+25, "N_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_N[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_N[[i+5]])^2)
+   output[i+(ii*5)+25, "NP_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_NP[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_NP[[i+5]])^2)
+   output[i+(ii*5)+25, "P_pca"] <- sqrt((distance$PC1_C[[ii+6]] - distance$PC1_P[[i+5]])^2 + (distance$PC2_C[[ii+6]] - distance$PC2_P[[i+5]])^2)
+   output[i+(ii*5)+25, "site"] <- paste0(distance$site[ii+6])
+   output[i+(ii*5)+25, "control"] <- paste0(distance$block[ii+6])
+   output[i+(ii*5)+25, "treatment"] <- paste0(distance$block[i+5])
+  } 
+}
+pca_C <- as_tibble(data.pca$x[,1:2]) %>% # function that compares each control to each control plot
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  dplyr::group_by(site, block, treatment) %>% 
+  summarise(PC1 = mean(PC1), PC2 = mean(PC2)) %>%
+  gather(variable, value, -(site:treatment)) %>%  filter(treatment=="C") %>% 
+  unite(temp, variable, block) %>% 
+  spread(temp, value) %>%  
+  mutate("0_1" = sqrt((PC1_0 - PC1_1)^2 + (PC2_0 - PC2_1)^2),
+         "0_2" = sqrt((PC1_0 - PC1_2)^2 + (PC2_0 - PC2_2)^2),
+         "0_3" = sqrt((PC1_0 - PC1_3)^2 + (PC2_0 - PC2_3)^2),
+         "0_4" = sqrt((PC1_0 - PC1_4)^2 + (PC2_0 - PC2_4)^2),
+         "1_2" = sqrt((PC1_1 - PC1_2)^2 + (PC2_1 - PC2_2)^2),
+         "1_3" = sqrt((PC1_1 - PC1_3)^2 + (PC2_1 - PC2_3)^2),
+         "1_4" = sqrt((PC1_1 - PC1_4)^2 + (PC2_1 - PC2_4)^2),
+         "2_3" = sqrt((PC1_2 - PC1_3)^2 + (PC2_2 - PC2_3)^2),
+         "2_4" = sqrt((PC1_2 - PC1_4)^2 + (PC2_2 - PC2_4)^2),
+         "3_4" = sqrt((PC1_3 - PC1_4)^2 + (PC2_3 - PC2_4)^2)) %>% 
+  ungroup() %>% 
+  select(site, treatment, "0_1":"3_4") %>% 
+  gather(comparison, pca, -c(site, treatment)) 
+
+pca_dist <- output %>% unite(comparison, control, treatment) %>% 
+  gather(variable, distance, -(site:comparison)) %>%
+  separate(variable, into = c("treatment","type")) %>%
+  spread(type, distance)
+
+pca_dist <- full_join(pca_dist, pca_C)
+#
+
+
+plots <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/plot_locations.csv", col_types = cols())
+cols <- c("site", "block", "treatment")
+plots[cols] <- lapply(plots[cols], factor)
+
+plots_dist <- plots %>% 
+  gather(variable, value, -(site:treatment)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value)
+
+output <- data_frame(site = rep(0,50), control = rep(0,50), treatment = rep(0,50), N_plot = rep(0,50), NP_plot = rep(0,50), P_plot = rep(0,50))
+for(ii in 0:4){
+ for(i in 1:5){
+   output[i+(ii*5), "N_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_N[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_N[[i]])^2)
+   output[i+(ii*5), "NP_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_NP[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_NP[[i]])^2)
+   output[i+(ii*5), "P_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_P[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_P[[i]])^2)
+   output[i+(ii*5) ,"site"] <- paste0(plots_dist$site[ii+1])
+   output[i+(ii*5) ,"control"] <- paste0(plots_dist$block[ii+1])
+   output[i+(ii*5) ,"treatment"] <- paste0(plots_dist$block[i]) 
+   
+   output[i+(ii*5)+25, "N_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_N[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_N[[i+5]])^2)
+   output[i+(ii*5)+25, "NP_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_NP[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_NP[[i+5]])^2)
+   output[i+(ii*5)+25, "P_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_P[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_P[[i+5]])^2)
+   output[i+(ii*5)+25 ,"site"] <- paste0(plots_dist$site[ii+6])
+   output[i+(ii*5)+25 ,"control"] <- paste0(plots_dist$block[ii+6])
+   output[i+(ii*5)+25 ,"treatment"] <- paste0(plots_dist$block[i+5])  
+ }
+}
+plot_C <- plots %>% 
+  gather(variable, value, -(site:treatment)) %>%  filter(treatment=="C") %>% 
+  unite(temp, variable, block) %>% 
+  spread(temp, value) %>%  
+  mutate("0_1" = sqrt((x_0 - x_1)^2 + (y_0 - y_1)^2),
+         "0_2" = sqrt((x_0 - x_2)^2 + (y_0 - y_2)^2),
+         "0_3" = sqrt((x_0 - x_3)^2 + (y_0 - y_3)^2),
+         "0_4" = sqrt((x_0 - x_4)^2 + (y_0 - y_4)^2),
+         "1_2" = sqrt((x_1 - x_2)^2 + (y_1 - y_2)^2),
+         "1_3" = sqrt((x_1 - x_3)^2 + (y_1 - y_3)^2),
+         "1_4" = sqrt((x_1 - x_4)^2 + (y_1 - y_4)^2),
+         "2_3" = sqrt((x_2 - x_3)^2 + (y_2 - y_3)^2),
+         "2_4" = sqrt((x_2 - x_4)^2 + (y_2 - y_4)^2),
+         "3_4" = sqrt((x_3 - x_4)^2 + (y_3 - y_4)^2)) %>% ungroup() %>% 
+  select(site, treatment, "0_1":"3_4") %>% 
+  gather(comparison, plot, -c(site, treatment))
+
+plot_dist <- output %>% unite(comparison, control, treatment)%>% 
+  gather(variable, distance, -(site:comparison)) %>%
+  separate(variable, into = c("treatment","type")) %>%
+  spread(type, distance)
+
+plot_dist <- full_join(plot_dist, plot_C)
+
+distance <- full_join(pca_dist, plot_dist) %>% 
+  mutate(plot_1 = (43.86342 - plot)/(43.86342-6),
+         pca_1 = pca * plot_1)
+
+distance %>% 
+  ggplot(aes(x = treatment, y = pca_1, fill = site)) +
+  facet_grid(.~site) +
+  stat_summary(fun.y = mean, geom = "bar", width=0.4, position = position_dodge(0.5)) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width=0.05, position = position_dodge(0.5)) +
+  ggtitle("2018")
+  
+ggsave(filename = "PCA_euclid_2018_distance_factor_spectal.pdf" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs",  width = 10, height = 6, units = "in")
+
+```
+
+```{r PCA manhatten distance (with distance factor) 2016-2019}
+data <-  df %>% filter(year==2018) %>% select(site:year, lai,ndvi, evi, evi2, gci, gli) %>% ungroup()
+data <- data[complete.cases(data),]
+data.pca <- prcomp(~lai + ndvi + evi + evi2 + gci + gli, data = data, scale = T, na.action = na.omit)
+
+distance <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>%
+  dplyr::group_by(site, block, treatment) %>% 
+  summarise(PC1 = mean(PC1), PC2 = mean(PC2)) %>% # took the mean of PC1 and PC2 values for 2018 and 2019
+  gather(variable, value, -(site:treatment)) %>% # gather variables to make unique column names for PC_Treatment
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value) # create a data frame for easy row manipulation
+
+output <- data_frame(site = rep(0,50), control = rep(0,50), treatment = rep(0,50), N_pca_x = rep(0,50), NP_pca_x = rep(0,50), P_pca_x = rep(0,50),
+                     N_pca_y = rep(0,50), NP_pca_y = rep(0,50), P_pca_y = rep(0,50))
+
+  for(ii in 0:4){
+    for(i in 1:5){
+     # for loop that calculates euclidean distance between each control and every treatment plot. ex. C0 with N0-N5, C1 with N0-N5 etc.
+     # severe [output + 0, ii + 1, i + 0]
+     output[i+(ii*5), "N_pca_x"] <- (distance$PC1_C[[ii+1]] - distance$PC1_N[[i]])
+     output[i+(ii*5), "NP_pca_x"] <- (distance$PC1_C[[ii+1]] - distance$PC1_NP[[i]])
+     output[i+(ii*5), "P_pca_x"] <- (distance$PC1_C[[ii+1]] - distance$PC1_P[[i]])
+     output[i+(ii*5), "N_pca_y"] <- (distance$PC2_C[[ii+1]] - distance$PC2_N[[i]])
+     output[i+(ii*5), "NP_pca_y"] <- (distance$PC2_C[[ii+1]] - distance$PC2_NP[[i]])
+     output[i+(ii*5), "P_pca_y"] <- (distance$PC2_C[[ii+1]] - distance$PC2_P[[i]])
+     output[i+(ii*5), "site"] <- paste0(distance$site[ii+1])
+     output[i+(ii*5), "control"] <- paste0(distance$block[ii+1])
+     output[i+(ii*5), "treatment"] <- paste0(distance$block[i]) 
+     
+     output[i+(ii*5)+25, "N_pca_x"] <- (distance$PC1_C[[ii+6]] - distance$PC1_N[[i+5]])
+     output[i+(ii*5)+25, "NP_pca_x"] <- (distance$PC1_C[[ii+6]] - distance$PC1_NP[[i+5]])
+     output[i+(ii*5)+25, "P_pca_x"] <- (distance$PC1_C[[ii+6]] - distance$PC1_P[[i+5]])
+     output[i+(ii*5)+25, "N_pca_y"] <- (distance$PC2_C[[ii+6]] - distance$PC2_N[[i+5]])
+     output[i+(ii*5)+25, "NP_pca_y"] <- (distance$PC2_C[[ii+6]] - distance$PC2_NP[[i+5]])
+     output[i+(ii*5)+25, "P_pca_y"] <- (distance$PC2_C[[ii+6]] - distance$PC2_P[[i+5]])
+     output[i+(ii*5)+25, "site"] <- paste0(distance$site[ii+6])
+     output[i+(ii*5)+25, "control"] <- paste0(distance$block[ii+6])
+     output[i+(ii*5)+25, "treatment"] <- paste0(distance$block[i+5]) 
+    } 
+  }
+output
+
+
+pca_C <- as_tibble(data.pca$x[,1:2]) %>% # function that compares each control to each control plot
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  dplyr::group_by(site, block, treatment) %>% 
+  summarise(PC1 = mean(PC1), PC2 = mean(PC2)) %>%
+  ungroup() %>% 
+  gather(variable, value, -(site:treatment)) %>%  filter(treatment=="C") %>% 
+  unite(temp, variable, block) %>% 
+  spread(temp, value) %>%  
+  mutate("0_1_x" = (PC1_0 - PC1_1),
+         "0_2_x" = (PC1_0 - PC1_2),
+         "0_3_x" = (PC1_0 - PC1_3),
+         "0_4_x" = (PC1_0 - PC1_4),
+         "1_2_x" = (PC1_1 - PC1_2),
+         "1_3_x" = (PC1_1 - PC1_3),
+         "1_4_x" = (PC1_1 - PC1_4),
+         "2_3_x" = (PC1_2 - PC1_3),
+         "2_4_x" = (PC1_2 - PC1_4),
+         "3_4_x" = (PC1_3 - PC1_4),
+         "0_1_y" = (PC2_0 - PC2_1),
+         "0_2_y" = (PC2_0 - PC2_2),
+         "0_3_y" = (PC2_0 - PC2_3),
+         "0_4_y" = (PC2_0 - PC2_4),
+         "1_2_y" = (PC2_1 - PC2_2),
+         "1_3_y" = (PC2_1 - PC2_3),
+         "1_4_y" = (PC2_1 - PC2_4),
+         "2_3_y" = (PC2_2 - PC2_3),
+         "2_4_y" = (PC2_2 - PC2_4),
+         "3_4_y" = (PC2_3 - PC2_4)) %>% 
+  select(site, treatment, "0_1_x":"3_4_y") %>% 
+  gather(comparison, pca, -c(site, treatment)) %>% separate(comparison,c("block_1","block_2", "direction")) %>% 
+  unite(comparison, block_1, block_2) %>% 
+  spread(direction, pca)
+
+pca_dist <- output %>% unite(comparison, control, treatment) %>% 
+  gather(variable, distance, -(site:comparison)) %>%
+  separate(variable, into = c("treatment","type","direction")) %>% select(-type) %>% 
+  spread(direction, distance)
+
+pca_dist <- full_join(pca_dist, pca_C) %>% arrange(site, treatment, comparison)
+###
+
+
+###
+plots <- read_csv("/Users/ianklupar/Desktop/thesis-data/v2/organized/plot_locations.csv", col_types = cols())
+cols <- c("site", "block", "treatment")
+plots[cols] <- lapply(plots[cols], factor)
+
+plots_dist <- plots %>% 
+  gather(variable, value, -(site:treatment)) %>% 
+  unite(temp, variable, treatment) %>% 
+  spread(temp, value)
+
+output <- data_frame(site = rep(0,50), control = rep(0,50), treatment = rep(0,50), N_plot = rep(0,50), NP_plot = rep(0,50), P_plot = rep(0,50))
+for(ii in 0:4){
+ for(i in 1:5){
+   output[i+(ii*5), "N_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_N[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_N[[i]])^2)
+   output[i+(ii*5), "NP_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_NP[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_NP[[i]])^2)
+   output[i+(ii*5), "P_plot"] <- sqrt((plots_dist$x_C[[ii+1]] - plots_dist$x_P[[i]])^2 + (plots_dist$y_C[[ii+1]] - plots_dist$y_P[[i]])^2)
+   output[i+(ii*5) ,"site"] <- paste0(plots_dist$site[ii+1])
+   output[i+(ii*5) ,"control"] <- paste0(plots_dist$block[ii+1])
+   output[i+(ii*5) ,"treatment"] <- paste0(plots_dist$block[i]) 
+   
+   output[i+(ii*5)+25, "N_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_N[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_N[[i+5]])^2)
+   output[i+(ii*5)+25, "NP_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_NP[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_NP[[i+5]])^2)
+   output[i+(ii*5)+25, "P_plot"] <- sqrt((plots_dist$x_C[[ii+6]] - plots_dist$x_P[[i+5]])^2 + (plots_dist$y_C[[ii+6]] - plots_dist$y_P[[i+5]])^2)
+   output[i+(ii*5)+25 ,"site"] <- paste0(plots_dist$site[ii+6])
+   output[i+(ii*5)+25 ,"control"] <- paste0(plots_dist$block[ii+6])
+   output[i+(ii*5)+25 ,"treatment"] <- paste0(plots_dist$block[i+5])  
+ }
+}
+plot_C <- plots %>% 
+  gather(variable, value, -(site:treatment)) %>%  filter(treatment=="C") %>% 
+  unite(temp, variable, block) %>% 
+  spread(temp, value) %>%  
+  mutate("0_1" = sqrt((x_0 - x_1)^2 + (y_0 - y_1)^2),
+         "0_2" = sqrt((x_0 - x_2)^2 + (y_0 - y_2)^2),
+         "0_3" = sqrt((x_0 - x_3)^2 + (y_0 - y_3)^2),
+         "0_4" = sqrt((x_0 - x_4)^2 + (y_0 - y_4)^2),
+         "1_2" = sqrt((x_1 - x_2)^2 + (y_1 - y_2)^2),
+         "1_3" = sqrt((x_1 - x_3)^2 + (y_1 - y_3)^2),
+         "1_4" = sqrt((x_1 - x_4)^2 + (y_1 - y_4)^2),
+         "2_3" = sqrt((x_2 - x_3)^2 + (y_2 - y_3)^2),
+         "2_4" = sqrt((x_2 - x_4)^2 + (y_2 - y_4)^2),
+         "3_4" = sqrt((x_3 - x_4)^2 + (y_3 - y_4)^2)) %>% ungroup() %>% 
+  select(site, treatment, "0_1":"3_4") %>% 
+  gather(comparison, plot, -c(site, treatment))
+
+plot_dist <- output %>% unite(comparison, control, treatment)%>% 
+  gather(variable, distance, -(site:comparison)) %>%
+  separate(variable, into = c("treatment","type")) %>%
+  spread(type, distance)
+
+plot_dist <- full_join(plot_dist, plot_C) %>% arrange(site, treatment, comparison)
+
+distance <- full_join(pca_dist, plot_dist) %>% 
+  mutate(plot = (43.86342 - plot)/(43.86342-6),
+         x_plot = x * plot,
+         y_plot = y * plot,
+         total = abs(x_plot) + abs(y_plot),
+         euclid = sqrt(x^2 + y^2) * plot) %>% ungroup()
+
+distance %>% 
+  ggplot(aes(x = treatment, y = x, fill = site)) +
+  facet_grid(.~site) +
+  stat_summary(fun.y = mean, geom = "bar", width=0.4, position = position_dodge(0.5)) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width=0.15, position = position_dodge(0.5)) +
+  ggtitle("")
+
+```
+
+```{r PCA vs LAI relationship, eval=FALSE}
+pca <- distance %>% select(site, treatment, comparison, pca_1) %>% separate(comparison, c("control","block")) %>% group_by(site, treatment, block) %>% summarise(pca_1 = mean(pca_1)) %>% 
+  arrange(site, treatment, block)
+lai <- lai_16_19 %>% arrange(site, treatment, block) 
+
+full_join(lai,pca) %>% 
+  ggplot(aes(x = pca_1, y = lai,color=treatment)) +
+  facet_grid(.~site)+
+  geom_point(size=2.5) +
+  ggtitle("Change in lai 16-19 vs. spectral index PCA distance")
+ggsave(filename = "lai_change_vs_spectral_PCA.pdf" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs",  width = 10, height = 6, units = "in")
+```
+
+```{r PCA graphs}
+colnames(df)
+data <-  df %>% filter(year==2016) %>% select(site:year, lai, ndvi, evi, evi2, gci, gli)
+data.pca <- prcomp(data[,-c(1:4)], scale = T)
+
+pca.means <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment) %>% 
+  summarise(PC1 = mean(PC1),
+            PC2 = mean(PC2))
+
+pca.points <- as_tibble(data.pca$x[,1:2]) %>% 
+  bind_cols(data[,c("site", "block", "treatment", "year")],.) %>% 
+  group_by(site, treatment)
+
+# pca.points %>% 
+#   group_by(site, treatment) %>% 
+#   summarise(PC1 = mean(PC1),
+#             PC2 = mean(PC2)) %>% 
+#   gather(-(site:treatment), key = "PC", value = "coord") %>% 
+#   unite(temp, PC, treatment) %>% 
+#   spread(temp, coord) %>% 
+#   mutate(x = PC1_C,
+#          y = PC2_C,
+#          xend = )
+
+PC1_control <- aggregate(PC1 ~ site * treatment, mean, data = subset(pca.points, pca.points$treatment=="C"))
+PC1_treatment <- aggregate(PC1 ~ site * treatment, mean, data = subset(pca.points, pca.points$treatment!="C"))
+PC2_control <- aggregate(PC2 ~ site * treatment, mean, data = subset(pca.points, pca.points$treatment=="C"))
+PC2_treatment <- aggregate(PC2 ~ site * treatment, mean, data = subset(pca.points, pca.points$treatment!="C"))
+mean_line <- data.frame(list(x=rep(PC1_control[,3], 3),  y=rep(PC2_control[,3], 3), xend=PC1_treatment[,3], yend=PC2_treatment[,3]))
+
+ggplot(aes(x = PC1, y = PC2), data = pca.points) +
+  geom_point(aes(color = site, shape = treatment)) +
+  geom_hline(yintercept=0, linetype = "dashed", color = "darkgrey") + 
+  geom_vline(xintercept=0, linetype = "dashed", color = "darkgrey") +
+  geom_point(data = pca.means, aes(x = PC1, y = PC2, color = site, shape = treatment, size = 2)) +
+  geom_segment(data = mean_line, aes(x = x, xend = xend, y = y, yend = yend), lty=2, color = "black") + 
+  ggtitle("")
+
+ggsave(filename = "productivity_pca.tiff" ,path = "/Users/ianklupar/Desktop/thesis-data/v2/organized/graphs", width = 25, height = 15, units = "cm", dpi = 200)
+```
